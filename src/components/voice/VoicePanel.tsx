@@ -4,6 +4,8 @@ import { Button, Field, Modal, Spinner } from '../atoms';
 import { supabase, sendPushToClient } from '../../services/supabase';
 import { detectIntent, type ParsedVoice } from '../../services/voiceParser';
 import { sanitize } from '../../services/sanitize';
+import { isCaseCreationBlocked } from '../../services/caseQuotas';
+import { useRole } from '../../context/RoleContext';
 
 interface VoicePanelProps {
   cases: any[];
@@ -14,6 +16,7 @@ interface VoicePanelProps {
 }
 
 export function VoicePanel({ cases, lawyerId, onDone, onClose, push }: VoicePanelProps) {
+  const { tier } = useRole();
   const [mode, setMode] = useState<'idle' | 'listening' | 'preview' | 'text'>('idle');
   const [transcript, setTranscript] = useState('');
   const [textIn, setTextIn] = useState('');
@@ -66,6 +69,11 @@ export function VoicePanel({ cases, lawyerId, onDone, onClose, push }: VoicePane
         if (result.existing.client_id) await sendPushToClient(result.existing.client_id, 'تحديث على قضيتك', `تم تحديث قضية ${fields.client_name}: ${fields.judgment}`);
         push(`✏️ تم تحديث قضية ${fields.client_name} — إشعار أُرسل`, 'warning');
       } else {
+        if (isCaseCreationBlocked(tier, cases.length)) {
+          push('⚠️ وصلت للحد الأقصى من القضايا لباقتك', 'warning');
+          setSaving(false);
+          return;
+        }
         const { error } = await supabase.from('cases').insert([payload]);
         if (error) throw error;
         push(`✨ تمت إضافة قضية ${fields.client_name}`, 'success');

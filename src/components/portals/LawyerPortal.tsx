@@ -13,6 +13,7 @@ import { useRole, type Profile } from '../../context/RoleContext';
 import { useCase } from '../../context/CaseContext';
 import { supabase, registerPush } from '../../services/supabase';
 import { sanitize } from '../../services/sanitize';
+import { isCaseCreationBlocked, TIER_CASE_LIMITS } from '../../services/caseQuotas';
 
 const DEFAULT_COLS = [
   { key: 'case_number', label: 'رقم القضية', type: 'text' },
@@ -82,7 +83,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   const [savingPayment, setSavingPayment] = useState(false);
 
   const { list: notifList, push } = useNotifications();
-  const { canViewChat, canViewCaseDetails, canManageBilling, tier, activeRole } = useRole();
+  const { canViewChat, canViewCaseDetails, canManageBilling, tier, activeRole, setProfile: setCtxProfile } = useRole();
   const {
     cases, loadCases, addCase, updateCase, deleteCase,
     selectedCase, setSelectedCase, loadEvents, loadAppointments, appointments,
@@ -91,7 +92,12 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   // Staff accounts use master_lawyer_id for case routing; master lawyers use their own id
   const effectiveLawyerId = profile.master_lawyer_id || user.id;
   const isMasterLawyer = !profile.master_lawyer_id;
-  const isFreeTierLocked = tier === 'free' && cases.length >= 3;
+  const isFreeTierLocked = isCaseCreationBlocked(tier, cases.length);
+
+  const updateProfile = (p: Profile) => {
+    setProfile(p);
+    setCtxProfile(p);
+  };
 
   // Debt enforcement: Block portal if debt > 500 EGP
   useEffect(() => {
@@ -216,7 +222,8 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
 
   const handleAddEmptyCase = async () => {
     if (isFreeTierLocked) {
-      push('⚠️ انتهت حدود الباقة المجانية - قم بالترقية لإضافة المزيد', 'warning');
+      const limit = TIER_CASE_LIMITS[tier];
+      push(`⚠️ تم الوصول للحد الأقصى (${limit === Infinity ? '∞' : limit} قضية) - قم بالترقية لإضافة المزيد`, 'warning');
       return;
     }
     const payload = {
@@ -499,7 +506,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Button size="sm" onClick={() => setShowVoice(true)} style={{ background: 'rgba(255,255,255,.12)', color: '#fff', border: '1px solid rgba(255,255,255,.2)' }}>
+          <Button size="sm" onClick={() => setShowVoice(true)} disabled={isFreeTierLocked} style={{ background: 'rgba(255,255,255,.12)', color: isFreeTierLocked ? 'rgba(255,255,255,.4)' : '#fff', border: '1px solid rgba(255,255,255,.2)', opacity: isFreeTierLocked ? 0.5 : 1 }}>
             <Mic size={14} /> إضافة قضية
           </Button>
           <button onClick={onLogout} style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.2)', color: '#fff', padding: '6px 14px', borderRadius: 10, cursor: 'pointer', fontSize: 12, fontFamily: "'Cairo',sans-serif", fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -594,7 +601,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
         )}
 
         {tab === 'sub' && (
-          <SubScreen profile={profile} onUpdateProfile={setProfile} push={push} caseCount={cases.length} />
+          <SubScreen profile={profile} onUpdateProfile={updateProfile} push={push} caseCount={cases.length} />
         )}
 
         {tab === 'billing' && canManageBilling && (

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, X, Copy, Link, Pencil, Check, Lock } from 'lucide-react';
 import { Button, Badge } from '../atoms';
 import { useRole } from '../../context/RoleContext';
+import { isCaseCreationBlocked, TIER_CASE_LIMITS } from '../../services/caseQuotas';
 
 interface Column {
   key: string;
@@ -53,7 +54,7 @@ export function CasesTable({
     if (editingCell && cellRef.current) cellRef.current.focus();
   }, [editingCell]);
 
-  const isFreeTierLocked = tier === 'free' && cases.length >= 3;
+  const isFreeTierLocked = isCaseCreationBlocked(tier, cases.length);
 
   const startEdit = (rowId: string, colKey: string, value: any) => {
     setEditingCell({ rowId, colKey });
@@ -266,7 +267,7 @@ export function CasesTable({
         <div style={{ padding: '8px 14px', background: '#FFFBEB', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Lock size={12} color="var(--gold)" />
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-            الباقة المجانية محدودة بـ 3 قضايا. <strong style={{ color: 'var(--navy)', cursor: 'pointer' }}>قم بالترقية</strong> لإضافة المزيد.
+            باقتك محدودة بـ {TIER_CASE_LIMITS[tier] === Infinity ? '∞' : TIER_CASE_LIMITS[tier]} قضية. <strong style={{ color: 'var(--navy)', cursor: 'pointer' }}>قم بالترقية</strong> لإضافة المزيد.
           </span>
         </div>
       )}

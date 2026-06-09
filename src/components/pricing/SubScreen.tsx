@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Crown, Zap, Users, Lock, Check, MapPin, Wallet, CreditCard, Shield, ArrowRight, Globe, DollarSign } from 'lucide-react';
+import { Crown, Zap, Users, Lock, Check, Wallet, Shield, Globe } from 'lucide-react';
 import { Button, Card, Badge, Spinner } from '../atoms';
 import { supabase } from '../../services/supabase';
 import { useRole, type Tier } from '../../context/RoleContext';
+import { isCaseCreationBlocked, TIER_CASE_LIMITS } from '../../services/caseQuotas';
 
 interface SubScreenProps {
   profile: any;
@@ -33,7 +34,7 @@ const TRANSLATIONS = {
     currentPlan: 'باقتك الحالية',
     month: 'شهر',
     features: {
-      free: ['3 قضايا فقط', 'تسجيل صوتي أساسي', 'بوابة الموكل'],
+      free: ['5 قضايا فقط', 'تسجيل صوتي أساسي', 'بوابة الموكل'],
       premium: [
         'شات ريل تايم مع الموكلين',
         'رفع حتى 30 صورة يومياً',
@@ -78,7 +79,7 @@ const TRANSLATIONS = {
     currentPlan: 'Your current plan',
     month: 'month',
     features: {
-      free: ['3 cases only', 'Basic voice recording', 'Client Portal'],
+      free: ['5 cases only', 'Basic voice recording', 'Client Portal'],
       premium: [
         'Real-time chat with clients',
         'Upload up to 30 images per day',
@@ -191,7 +192,7 @@ export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: Sub
   };
 
   const isCurTier = (tierId: string) => (profile?.tier || 'free') === tierId;
-  const isFreeTierLocked = tier === 'free' && caseCount >= 3;
+  const isFreeTierLocked = isCaseCreationBlocked(tier, caseCount);
 
   const openCheckout = (tierInfo: TierInfo) => {
     if (tierInfo.id === 'free') return;
@@ -295,7 +296,7 @@ export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: Sub
           <Lock size={16} color="var(--danger)" />
           <div>
             <p style={{ fontSize: 13, fontWeight: 800, color: 'var(--danger)' }}>{lang === 'ar' ? 'تم الوصول للحد الأقصى' : 'Limit Reached'}</p>
-            <p style={{ fontSize: 11, color: 'var(--muted)' }}>{lang === 'ar' ? 'باقة المجاني تسمح بـ 3 قضايا فقط' : 'Free plan allows only 3 cases'}</p>
+            <p style={{ fontSize: 11, color: 'var(--muted)' }}>{lang === 'ar' ? `باقتك محدودة بـ ${TIER_CASE_LIMITS[tier] === Infinity ? '∞' : TIER_CASE_LIMITS[tier]} قضية` : `Your plan is limited to ${TIER_CASE_LIMITS[tier] === Infinity ? '∞' : TIER_CASE_LIMITS[tier]} cases`}</p>
           </div>
         </div>
       )}
