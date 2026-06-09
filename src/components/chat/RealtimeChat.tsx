@@ -15,6 +15,7 @@ interface Message {
   is_deleted: boolean;
   attachment_url?: string;
   attachment_type?: string;
+  room_type?: string;
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +73,7 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
         .from('messages')
         .select('*')
         .eq('case_id', selectedCase.id)
+        .neq('room_type', 'internal_team_chat')
         .order('created_at', { ascending: true });
 
       if (!error && data) setMsgs(data);
@@ -87,9 +89,12 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
         event: 'INSERT', schema: 'public', table: 'messages',
         filter: `case_id=eq.${selectedCase.id}`,
       }, (payload) => {
+        const msg = payload.new as Message;
+        // Filter out internal team chat from lawyer's client chat view
+        if ((msg as any).room_type === 'internal_team_chat') return;
         setMsgs((prev) => {
-          if (prev.some((m) => m.id === payload.new.id)) return prev;
-          return [...prev, payload.new as Message];
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
         });
       })
       .on('postgres_changes', {

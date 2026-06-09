@@ -504,6 +504,10 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
 
     const dayLabel = DAYS_OF_WEEK.find(d => d.id === selectedDay)?.label || selectedDay;
     const lawyerId = lawyerInfo?.id || urlLawyerId || profile?.linked_lawyer_id;
+    if (!lawyerId) {
+      push('لم يتم تحديد المحامي', 'danger');
+      return;
+    }
     const clientName = profile?.full_name || selectedCase.client_name || 'موكل';
     const caseNumber = selectedCase.case_number;
 

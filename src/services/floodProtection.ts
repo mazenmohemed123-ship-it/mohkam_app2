@@ -1,6 +1,6 @@
 const timestamps: number[] = [];
-const LIMIT = 2;
-const WINDOW_MS = 60_000;
+const LIMIT = 10;
+const WINDOW_MS = 30_000;
 
 export function checkFloodLimit(): { allowed: boolean; remaining: number } {
   const now = Date.now();

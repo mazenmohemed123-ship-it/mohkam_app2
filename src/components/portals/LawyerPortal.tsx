@@ -175,7 +175,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
       })
       .subscribe();
     return () => { ch.unsubscribe(); };
-  }, [user.id, push]);
+  }, [effectiveLawyerId, push]);
 
   // Real-time subscription for appointment requests with sound alert
   useEffect(() => {
