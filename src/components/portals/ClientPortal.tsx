@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Scale, LogOut, Phone, Calendar, AlertTriangle, Bot, Send, MessageSquare, Users, ChevronDown, CreditCard, Lock, Wallet, ArrowRight, Clock, ChevronLeft } from 'lucide-react';
+import { Scale, LogOut, Phone, Calendar, AlertTriangle, Bot, Send, MessageSquare, Users, ChevronDown, CreditCard, Lock, Wallet, ArrowRight, Clock, ChevronLeft, AlertTriangle as AlertIcon } from 'lucide-react';
 import { Button, Card, Badge, Modal, Field, NotificationUI } from '../atoms';
 import { supabase, sendPushToClient } from '../../services/supabase';
 import { checkFloodLimit } from '../../services/floodProtection';
+import { checkChatUploadQuota, getDailyChatUploadCount } from '../../services/chatQuotas';
 import { useNotifications } from '../../hooks/useNotifications';
 import { sanitize, sanitizeLike } from '../../services/sanitize';
 import { isValidGlobalPhone } from '../../services/phoneValidation';
@@ -180,6 +181,9 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
 
   /* Team members for Team plan */
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+
+  /* Quota warning state */
+  const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
 
   /* Appointment status tracking */
   const [appointmentStatus, setAppointmentStatus] = useState<AppointmentRequest | null>(null);
@@ -381,6 +385,18 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     if (!input.trim() && !attachment) return;
     const { allowed } = checkFloodLimit();
     if (!allowed) { push('⚠️ إرسال سريع جداً! انتظر قليلاً', 'warning'); return; }
+
+    // Tier-based quota check for file uploads
+    if (attachment && selectedCase) {
+      const fileSizeMB = attachment.size / (1024 * 1024);
+      const dailyCount = await getDailyChatUploadCount(selectedCase.id, lawyerInfo?.id || '');
+      const quotaCheck = checkChatUploadQuota(lawyerTier, dailyCount, fileSizeMB);
+      if (!quotaCheck.allowed) {
+        setQuotaWarning(quotaCheck.reason || 'تم تجاوز الحد');
+        return;
+      }
+    }
+
     const txt = input;
     const userMsgTime = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
 
@@ -414,9 +430,10 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         case_id: selectedCase.id,
         sender_id: user.id,
         sender_role: 'client',
-        message_text: sanitize(txt),
+        message_text: sanitize(txt) || (attachment ? '📎 مرفق' : ''),
         attachment_url: attachmentUrl,
         attachment_type: attachmentType,
+        room_type: 'client_chat',
       }]);
     }
   };
@@ -1068,6 +1085,20 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
               </Button>
             </div>
           )}
+        </Modal>
+      )}
+
+      {/* Quota Warning Modal */}
+      {quotaWarning && (
+        <Modal onClose={() => setQuotaWarning(null)}>
+          <div style={{ padding: 24, textAlign: 'center' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FDECEF', margin: '0 auto 14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle size={28} color="var(--danger)" />
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--danger)', marginBottom: 10 }}>تم تجاوز الحد</h3>
+            <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.8 }}>{quotaWarning}</p>
+            <Button variant="primary" fullWidth onClick={() => setQuotaWarning(null)} style={{ marginTop: 16 }}>فهمت</Button>
+          </div>
         </Modal>
       )}
     </div>

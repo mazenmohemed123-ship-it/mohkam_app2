@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, CreditCard as Edit3, Trash2, MessageSquare, Shield, Scale, Phone, Hash, FileText, User, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button, Card, Badge } from '../atoms';
+import { Send, CreditCard as Edit3, Trash2, MessageSquare, Shield, Scale, Phone, Hash, FileText, User, ChevronLeft, ChevronRight, Image as ImageIcon, AlertTriangle } from 'lucide-react';
+import { Button, Card, Badge, Modal } from '../atoms';
 import { sanitize } from '../../services/sanitize';
 import { supabase } from '../../services/supabase';
 import { checkFloodLimit } from '../../services/floodProtection';
+import { checkChatUploadQuota, getDailyChatUploadCount } from '../../services/chatQuotas';
 import { useRole } from '../../context/RoleContext';
 
 interface Message {
@@ -12,6 +13,8 @@ interface Message {
   sender_id: string;
   message_text: string;
   is_deleted: boolean;
+  attachment_url?: string;
+  attachment_type?: string;
   created_at: string;
   updated_at: string;
 }
@@ -40,7 +43,7 @@ interface RealtimeChatProps {
 }
 
 export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
-  const { canViewChat } = useRole();
+  const { canViewChat, tier } = useRole();
   const [selectedCase, setSelectedCase] = useState<CaseInfo | null>(null);
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -50,6 +53,7 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
   const [editText, setEditText] = useState('');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const chRef = useRef<any>(null);
 
@@ -101,8 +105,9 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
 
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || !selectedCase) return;
+  const sendMessage = useCallback(async (attachment?: File) => {
+    if (!input.trim() && !attachment) return;
+    if (!selectedCase) return;
     if (input.length > MAX_MSG_LEN) { push('⚠️ الرسالة طويلة جداً', 'warning'); return; }
 
     const { allowed } = checkFloodLimit();
@@ -111,16 +116,43 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
       return;
     }
 
+    let attachmentUrl: string | undefined;
+    let attachmentType: string | undefined;
+
+    if (attachment) {
+      const fileSizeMB = attachment.size / (1024 * 1024);
+      const dailyCount = await getDailyChatUploadCount(selectedCase.id, userId);
+      const quotaCheck = checkChatUploadQuota(tier, dailyCount, fileSizeMB);
+      if (!quotaCheck.allowed) {
+        setQuotaWarning(quotaCheck.reason || 'تم تجاوز الحد');
+        return;
+      }
+
+      const path = `chat/${selectedCase.id}/${Date.now()}_${attachment.name}`;
+      const { error: uploadErr } = await supabase.storage.from('documents').upload(path, attachment);
+      if (!uploadErr) {
+        const { data } = supabase.storage.from('documents').getPublicUrl(path);
+        attachmentUrl = data?.publicUrl;
+        attachmentType = attachment.type.startsWith('image/') ? 'image' : attachment.type.startsWith('video/') ? 'video' : undefined;
+      } else {
+        push('خطأ في رفع الملف', 'danger');
+        return;
+      }
+    }
+
     const safeInput = sanitize(input);
     const { error } = await supabase.from('messages').insert([{
       case_id: selectedCase.id,
       sender_id: userId,
-      message_text: safeInput,
+      message_text: safeInput || (attachment ? '📎 مرفق' : ''),
+      attachment_url: attachmentUrl,
+      attachment_type: attachmentType,
+      room_type: 'client_chat',
     }]);
 
     if (!error) setInput('');
     else push('خطأ في الإرسال', 'danger');
-  }, [input, selectedCase, userId, push]);
+  }, [input, selectedCase, userId, push, tier]);
 
   const deleteMessage = async (id: string) => {
     await supabase.from('messages').update({ is_deleted: true, message_text: '🚫 تم حذف هذه الرسالة' }).eq('id', id);
@@ -348,7 +380,15 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
                             <Button size="sm" onClick={() => editMessage(msg.id)}>✓</Button>
                           </div>
                         ) : (
-                          msg.message_text
+                          <>
+                            {msg.attachment_url && msg.attachment_type === 'image' && (
+                              <img src={msg.attachment_url} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: msg.message_text && msg.message_text !== '📎 مرفق' ? 8 : 0 }} />
+                            )}
+                            {msg.attachment_url && msg.attachment_type === 'video' && (
+                              <video src={msg.attachment_url} controls style={{ maxWidth: '100%', borderRadius: 8, marginBottom: msg.message_text && msg.message_text !== '📎 مرفق' ? 8 : 0 }} />
+                            )}
+                            {msg.message_text !== '📎 مرفق' && msg.message_text}
+                          </>
                         )}
                         <p style={{ fontSize: 9, marginTop: 4, opacity: 0.45, textAlign: 'left', fontFamily: "'JetBrains Mono', monospace" }}>
                           {new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
@@ -384,6 +424,18 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
 
             {/* Input */}
             <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, background: '#fff' }}>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, background: '#F5F8FF', borderRadius: 10, cursor: 'pointer', flexShrink: 0 }}>
+                <input
+                  type="file"
+                  accept="image/*,video/*,.pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) sendMessage(file);
+                  }}
+                  style={{ display: 'none' }}
+                />
+                <ImageIcon size={16} color="var(--navy)" />
+              </label>
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -398,7 +450,7 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
                 onFocus={(e) => { (e.currentTarget as HTMLInputElement).style.border = '1.5px solid var(--navy-mid)'; }}
                 onBlur={(e) => { (e.currentTarget as HTMLInputElement).style.border = '1.5px solid var(--border)'; }}
               />
-              <Button onClick={sendMessage} style={{ padding: '10px 16px' }}>
+              <Button onClick={() => sendMessage()} style={{ padding: '10px 16px' }}>
                 <Send size={16} />
               </Button>
             </div>
@@ -410,6 +462,20 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
           </div>
         )}
       </div>
+
+      {/* Quota Warning Modal */}
+      {quotaWarning && (
+        <Modal onClose={() => setQuotaWarning(null)}>
+          <div style={{ padding: 24, textAlign: 'center' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FDECEF', margin: '0 auto 14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle size={28} color="var(--danger)" />
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--danger)', marginBottom: 10 }}>تم تجاوز الحد</h3>
+            <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.8 }}>{quotaWarning}</p>
+            <Button variant="primary" fullWidth onClick={() => setQuotaWarning(null)} style={{ marginTop: 16 }}>فهمت</Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

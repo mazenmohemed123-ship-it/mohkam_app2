@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Scale, Mic, LogOut, ClipboardList, MessageSquare, User as UserIcon, Crown, Settings, FileText, Bell, Calculator, Lock, AlertTriangle, Calendar, Zap, CreditCard as Edit3, Clock, Plus, X, Check, Wallet, CreditCard, Phone } from 'lucide-react';
+import { Scale, Mic, LogOut, ClipboardList, MessageSquare, User as UserIcon, Crown, Settings, FileText, Bell, Calculator, Lock, AlertTriangle, Calendar, Zap, CreditCard as Edit3, Clock, Plus, X, Check, Wallet, CreditCard, Phone, Users } from 'lucide-react';
 import { Button, Card, NotificationUI, Badge, Field } from '../atoms';
 import { CasesTable } from '../tables/CasesTable';
 import { CaseTimeline } from '../cases/CaseTimeline';
 import { RealtimeChat } from '../chat/RealtimeChat';
+import { TeamChat } from '../chat/TeamChat';
+import { TeamManagement } from '../team/TeamManagement';
 import { SubScreen } from '../pricing/SubScreen';
 import { VoicePanel } from '../voice/VoicePanel';
 import { useNotifications } from '../../hooks/useNotifications';
@@ -86,6 +88,9 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
     selectedCase, setSelectedCase, loadEvents, loadAppointments, appointments,
   } = useCase();
 
+  // Staff accounts use master_lawyer_id for case routing; master lawyers use their own id
+  const effectiveLawyerId = profile.master_lawyer_id || user.id;
+  const isMasterLawyer = !profile.master_lawyer_id;
   const isFreeTierLocked = tier === 'free' && cases.length >= 3;
 
   // Debt enforcement: Block portal if debt > 500 EGP
@@ -97,7 +102,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
     }
   }, [commissionDebt]);
 
-  useEffect(() => { loadCases(user.id); loadAppointments(user.id); }, [user.id, loadCases, loadAppointments]);
+  useEffect(() => { loadCases(effectiveLawyerId); loadAppointments(effectiveLawyerId); }, [effectiveLawyerId, loadCases, loadAppointments]);
 
   // Load availability
   useEffect(() => {
@@ -135,8 +140,8 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   // Real-time subscription for cases
   useEffect(() => {
     const ch = supabase
-      .channel('cases:' + user.id)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cases', filter: `lawyer_id=eq.${user.id}` }, () => loadCases(user.id))
+      .channel('cases:' + effectiveLawyerId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cases', filter: `lawyer_id=eq.${effectiveLawyerId}` }, () => loadCases(effectiveLawyerId))
       .subscribe();
     return () => { ch.unsubscribe(); };
   }, [user.id, loadCases]);
@@ -144,11 +149,11 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   // Real-time subscription for emergencies - HIGH PRIORITY ALERT
   useEffect(() => {
     const ch = supabase
-      .channel('emergencies_alerts:' + user.id)
+      .channel('emergencies_alerts:' + effectiveLawyerId)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'case_emergencies' }, async (payload) => {
         const emg = payload.new;
         const { data: caseData } = await supabase.from('cases').select('lawyer_id,client_name,client_phone').eq('id', emg.case_id).single();
-        if (caseData?.lawyer_id === user.id) {
+        if (caseData && caseData.lawyer_id === effectiveLawyerId) {
           const newEmergency = { ...emg, client_name: caseData.client_name, client_phone: caseData.client_phone };
           setEmergencies((prev) => [newEmergency, ...prev]);
           setFlashAlert({ type: 'emergency', data: newEmergency });
@@ -163,8 +168,8 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   // Real-time subscription for appointment requests with sound alert
   useEffect(() => {
     const ch = supabase
-      .channel('appointments_alerts:' + user.id)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'appointment_requests', filter: `lawyer_id=eq.${user.id}` }, (payload) => {
+      .channel('appointments_alerts:' + effectiveLawyerId)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'appointment_requests', filter: `lawyer_id=eq.${effectiveLawyerId}` }, (payload) => {
         const appt = payload.new;
         if (appt.status === 'pending') {
           setPendingAppointments((prev) => [appt, ...prev]);
@@ -179,12 +184,12 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
           setTimeout(() => setFlashAlert(null), 15000);
         }
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointment_requests', filter: `lawyer_id=eq.${user.id}` }, (payload) => {
-        loadAppointments(user.id);
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointment_requests', filter: `lawyer_id=eq.${effectiveLawyerId}` }, () => {
+        loadAppointments(effectiveLawyerId);
       })
       .subscribe();
     return () => { ch.unsubscribe(); };
-  }, [user.id, push, loadAppointments]);
+  }, [effectiveLawyerId, push, loadAppointments]);
 
   // Handle appointment approval
   const handleAppointmentAction = async (apptId: string, action: 'accepted' | 'rejected' | 'rescheduled', alternativeTime?: string) => {
@@ -218,7 +223,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
       case_number: 'MHK-' + Date.now().toString().slice(-5),
       case_type: '', client_name: '', client_phone: '',
       judgment: 'قيد الانتظار', total_fees: 0, admin_fees: 0,
-      lawyer_id: user.id,
+      lawyer_id: effectiveLawyerId,
     };
     const newCase = await addCase(payload);
     if (newCase) push('✨ تم إضافة قضية جديدة', 'success');
@@ -361,6 +366,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
     { id: 'cases', icon: ClipboardList, label: 'القضايا' },
     ...(canViewChat ? [{ id: 'chat', icon: MessageSquare, label: 'الشات' }] : []),
     ...(canViewCaseDetails ? [{ id: 'timeline', icon: FileText, label: 'التايملاين' }] : []),
+    ...(tier === 'team' ? [{ id: 'team', icon: Users, label: 'الفريق' }] : []),
     { id: 'sub', icon: Crown, label: 'الباقة' },
     ...(canManageBilling ? [{ id: 'billing', icon: Calculator, label: 'الفواتير' }] : []),
     { id: 'settings', icon: Settings, label: 'الإعدادات' },
@@ -435,7 +441,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
                   من: {flashAlert.data.client_name || 'موكل'} | {flashAlert.data.essential_needs?.slice(0, 50)}...
                 </p>
               </div>
-              <Badge style={{ background: 'rgba(255,255,255,.25)', color: '#fff', border: 'none' }}>عاجل</Badge>
+              <Badge color="red">عاجل</Badge>
             </>
           ) : (
             <>
@@ -556,7 +562,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
         {tab === 'timeline' && canViewCaseDetails && selectedCase && (
           <CaseTimeline
             caseId={selectedCase.id}
-            lawyerId={user.id}
+            lawyerId={effectiveLawyerId}
             userId={user.id}
             activeRole={activeRole}
             userName={profile?.full_name}
@@ -568,6 +574,23 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
             <FileText size={40} color="var(--border)" style={{ margin: '0 auto 12px' }} />
             <p style={{ fontWeight: 700, color: 'var(--muted)', fontSize: 14 }}>اختر قضية لعرض التايملاين</p>
           </Card>
+        )}
+
+        {tab === 'team' && tier === 'team' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <TeamChat
+              masterLawyerId={effectiveLawyerId}
+              userId={user.id}
+              userRole={activeRole}
+              push={push}
+            />
+            {isMasterLawyer && (
+              <TeamManagement
+                masterLawyerId={user.id}
+                push={push}
+              />
+            )}
+          </div>
         )}
 
         {tab === 'sub' && (
@@ -1011,7 +1034,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
         )}
       </main>
 
-      {showVoice && <VoicePanel cases={cases} lawyerId={user.id} onDone={() => loadCases(user.id)} onClose={() => setShowVoice(false)} push={push} />}
+      {showVoice && <VoicePanel cases={cases} lawyerId={effectiveLawyerId} onDone={() => loadCases(effectiveLawyerId)} onClose={() => setShowVoice(false)} push={push} />}
     </div>
   );
 }

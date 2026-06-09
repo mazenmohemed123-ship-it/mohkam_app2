@@ -34,8 +34,23 @@ const TRANSLATIONS = {
     month: 'شهر',
     features: {
       free: ['3 قضايا فقط', 'تسجيل صوتي أساسي', 'بوابة الموكل'],
-      premium: ['قضايا غير محدودة', 'شات real-time', 'إشعارات FCM', 'رابط دعوة', 'تحليل صوتي'],
-      team: ['كل ميزات الاحترافي', 'حتى 10 محامين', 'تقارير مالية', 'دعم أولوية', 'سكرتير ومحاسب'],
+      premium: [
+        'شات ريل تايم مع الموكلين',
+        'رفع حتى 30 صورة يومياً',
+        'مساحة ملفات 100 ميجا',
+        'نظام الإشعارات الفورية (Push Notifications)',
+        'إدارة غير محدودة للقضايا والجلسات',
+        'نظام الفواتير الرقمية وتحصيل الأتعاب',
+      ],
+      team: [
+        'كل مميزات باقة Pro',
+        'إضافة عدد غير محدود من الموظفين (مساعد، سكرتير، محاسب)',
+        'الشات الداخلي السري لأعضاء المكتب (Internal Team Chat)',
+        'مصفوفة صلاحيات دقيقة لكل موظف',
+        'رفع غير محدود للصور والملفات (بدون أي قيود)',
+        'لوحة تقارير الأداء المالي للمكتب بالكامل',
+        'توفير قفل شاشة الأمان المتقدمة',
+      ],
     },
     subscribeNow: 'اشترك الآن',
     currentPlanBtn: 'خطتك الحالية',
@@ -64,8 +79,23 @@ const TRANSLATIONS = {
     month: 'month',
     features: {
       free: ['3 cases only', 'Basic voice recording', 'Client Portal'],
-      premium: ['Unlimited cases', 'Real-time chat', 'FCM notifications', 'Invite link', 'Voice analysis'],
-      team: ['All Pro features', 'Up to 10 lawyers', 'Financial reports', 'Priority support', 'Secretary & accountant'],
+      premium: [
+        'Real-time chat with clients',
+        'Upload up to 30 images per day',
+        '100 MB file storage',
+        'Push Notifications system',
+        'Unlimited case & session management',
+        'Digital invoicing & fee collection',
+      ],
+      team: [
+        'All Pro features included',
+        'Unlimited staff accounts (assistant, secretary, accountant)',
+        'Private Internal Team Chat for firm members',
+        'Granular permissions matrix per employee',
+        'Unlimited file & image uploads (no restrictions)',
+        'Full firm financial performance dashboard',
+        'Advanced security screen lock',
+      ],
     },
     subscribeNow: 'Subscribe Now',
     currentPlanBtn: 'Your Current Plan',
@@ -131,7 +161,7 @@ export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: Sub
   const [upgrading, setUpgrading] = useState<string | null>(null);
   const [currency, setCurrency] = useState<string>('USD');
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
-  const { isTeamLocked, tier } = useRole();
+  const { tier } = useRole();
 
   /* Checkout modal state */
   const [showCheckout, setShowCheckout] = useState(false);
@@ -274,7 +304,6 @@ export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: Sub
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {TIERS.map((tierInfo) => {
           const isCur = isCurTier(tierInfo.id);
-          const isLocked = tierInfo.id === 'team' && isTeamLocked;
           const Icon = tierInfo.icon;
 
           return (
@@ -327,20 +356,14 @@ export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: Sub
               {/* Subscribe button */}
               <Button
                 variant={isCur ? 'secondary' : tierInfo.id === 'team' ? 'gold' : 'primary'}
-                disabled={isCur || upgrading === tierInfo.id || isLocked}
-                onClick={() => !isLocked && openCheckout(tierInfo)}
+                disabled={isCur || upgrading === tierInfo.id}
+                onClick={() => openCheckout(tierInfo)}
                 fullWidth
                 style={{ background: isCur ? undefined : tierInfo.color }}
               >
                 {upgrading === tierInfo.id ? <><Spinner /> {t.processing}</> : isCur ? t.currentPlanBtn : t.subscribeNow}
               </Button>
 
-              {/* Lock overlay */}
-              {isLocked && (
-                <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,.7)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--radius)', zIndex: 10 }}>
-                  <Badge color="gold"><Lock size={10} style={{ marginRight: 4 }} /> {lang === 'ar' ? 'مقفلة' : 'Locked'}</Badge>
-                </div>
-              )}
             </Card>
           );
         })}
@@ -348,8 +371,8 @@ export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: Sub
 
       {/* ==================== CHECKOUT MODAL - Mobile Responsive ==================== */}
       {showCheckout && selectedTier && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,20,60,.85)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: '8px', '@media (min-width: 640px)': { alignItems: 'center', padding: 16 } }}>
-          <Card className="slide-up" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden', maxHeight: 'calc(100vh - 16px)', overflowY: 'auto', borderRadius: '20px 20px 0 0', '@media (min-width: 640px)': { maxWidth: 440, borderRadius: 16, maxHeight: '90vh' } }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,20,60,.85)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <Card className="slide-up" style={{ width: '100%', maxWidth: 440, overflow: 'hidden', maxHeight: '90vh', overflowY: 'auto', borderRadius: 16 }}>
             {/* Header */}
             <div style={{ background: 'linear-gradient(135deg, var(--navy), var(--navy-light))', padding: '18px 20px', color: '#fff' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
