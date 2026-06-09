@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Scale, Mic, LogOut, ClipboardList, MessageSquare, User as UserIcon, Crown, Settings, FileText, Bell, Calculator, Lock, AlertTriangle, Calendar, Zap, CreditCard as Edit3, Clock, Plus, X, Check, Wallet, CreditCard, Phone, Users } from 'lucide-react';
-import { Button, Card, NotificationUI, Badge, Field } from '../atoms';
+import { Scale, Mic, LogOut, ClipboardList, MessageSquare, User as UserIcon, Crown, Settings, FileText, Bell, Calculator, AlertTriangle, Calendar, Zap, CreditCard as Edit3, Clock, Check, Wallet, CreditCard, Users } from 'lucide-react';
+import { Button, Card, NotificationUI, Badge } from '../atoms';
 import { CasesTable } from '../tables/CasesTable';
 import { CaseTimeline } from '../cases/CaseTimeline';
 import { RealtimeChat } from '../chat/RealtimeChat';
@@ -72,7 +72,6 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   });
   const [workFrom, setWorkFrom] = useState('09:00');
   const [workTo, setWorkTo] = useState('17:00');
-  const [savingAvailability, setSavingAvailability] = useState(false);
 
   // Payment credentials state
   const [vodafoneCash, setVodafoneCash] = useState(initProfile.vodafone_cash_number || '');
@@ -164,6 +163,13 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
           setEmergencies((prev) => [newEmergency, ...prev]);
           setFlashAlert({ type: 'emergency', data: newEmergency });
           push(`🆘 طلب طوارئ عاجل من ${caseData.client_name || 'موكل'}`, 'danger');
+          // Audio + vibration alert
+          try {
+            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleQwAPLHd+ZdxOQA4qt/7oHEsADu08vufWSgAN67p/KlcFgA0p+n6s10AADGi4/qjUgAIX5zc9qVJAP9YfNj0oUkA/1Z52fOkSwD/WoXS8qRQAP9fg9PxolEA/1qB0/GmVQD/YIDS86dWAP9cgNLwpVYA/1d/0vCmVwD/V3/S8KZZAP9YfNLwp1kA/1h80vCnWQD/WH3S8KdZAP9YfNLwp1kA/1h80vCnWQD//w==');
+            audio.volume = 1;
+            audio.play().catch(() => {});
+          } catch {}
+          try { navigator.vibrate?.([200, 100, 200, 100, 200]); } catch {}
           setTimeout(() => setFlashAlert(null), 10000);
         }
       })
@@ -314,7 +320,6 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   };
 
   const saveAvailability = async () => {
-    setSavingAvailability(true);
     const timeSlots = generateTimeSlots(workFrom, workTo);
     const { error } = await supabase
       .from('lawyer_availability')
@@ -332,7 +337,6 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
     } else {
       push('خطأ في حفظ الجدول', 'danger');
     }
-    setSavingAvailability(false);
   };
 
   const uploadQRCode = async (file: File) => {
@@ -1026,16 +1030,13 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
 
             {/* Invite Links */}
             <Card style={{ padding: 22 }}>
-              <h3 style={{ fontWeight: 800, marginBottom: 14, color: 'var(--navy)' }}>🔗 روابط دعوة الموكلين</h3>
-              {cases.map((c) => {
-                const link = `${origin}/?join_lawyer=${user.id}&client_invite_token=${c.case_number}`;
-                return (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <code style={{ flex: 1, fontSize: 10, background: 'var(--bg)', padding: '6px 10px', borderRadius: 8, color: 'var(--navy)', fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{link}</code>
-                    <Button size="sm" variant="secondary" onClick={() => { navigator.clipboard?.writeText(link); push('تم نسخ الرابط', 'success'); }}>نسخ</Button>
-                  </div>
-                );
-              })}
+              <h3 style={{ fontWeight: 800, marginBottom: 14, color: 'var(--navy)' }}>🔗 رابط مكتبك الدائم</h3>
+              <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>رابط ثابت لمكتبك — شاركه مع أي موكل للدخول مباشرة</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                <code style={{ flex: 1, fontSize: 11, background: 'var(--bg)', padding: '10px 14px', borderRadius: 8, color: 'var(--navy)', fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{origin}/portal/lawyer/{user.id}</code>
+                <Button size="sm" variant="gold" onClick={() => { navigator.clipboard?.writeText(`${origin}/portal/lawyer/${user.id}`); push('تم نسخ رابط المكتب', 'success'); }}>نسخ</Button>
+              </div>
+              <p style={{ fontSize: 10, color: 'var(--muted)' }}>عند دخول موكل عبر هذا الرابط وباقتك Team، يمكنه اختيار عضو الفريق للتواصل معه</p>
             </Card>
           </div>
         )}

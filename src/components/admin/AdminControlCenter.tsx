@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Search, Users, DollarSign, Ban, Check, X, Crown, Zap, Settings, AlertTriangle, LogOut, CreditCard as Edit3, Save, Filter, TrendingUp, UserX, UserCheck } from 'lucide-react';
+import { Shield, Search, Users, DollarSign, Check, X, Crown, Zap, Settings, AlertTriangle, LogOut, CreditCard as Edit3, Save, UserX, UserCheck } from 'lucide-react';
 import { Button, Card, Badge, Spinner } from '../atoms';
 import { supabase } from '../../services/supabase';
 import { useNotifications } from '../../hooks/useNotifications';
@@ -23,10 +23,6 @@ interface LawyerProfile {
   created_at: string;
   started_at?: string;
   expires_at?: string;
-}
-
-interface GlobalSettings {
-  default_commission_percentage: number;
 }
 
 const STATUS_FILTERS = [
@@ -105,8 +101,6 @@ export function AdminControlCenter({ user, onLogout }: AdminControlCenterProps) 
     const activeTeam = lawyerList.filter(l => l.tier === 'team' && !l.is_frozen).length;
     // Calculate revenue (simplified - sum of commissions owed)
     const totalRevenue = lawyerList.reduce((sum, l) => {
-      const rate = (l.commission_rate || 5) / 100;
-      // Estimate from debt as proxy
       return sum + (l.commission_debt || 0);
     }, 0);
     setStats({ totalRevenue, activeFree, activePremium, activeTeam, totalDebt });

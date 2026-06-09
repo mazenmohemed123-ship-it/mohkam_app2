@@ -25,7 +25,7 @@ interface DocumentVaultProps {
 const SINGLE_FILE_LIMIT = 25 * 1024 * 1024; // 25MB per file
 
 export function DocumentVault({ caseId, userId, push }: DocumentVaultProps) {
-  const { canUploadFiles, tier, dailyUploadLimitMB } = useRole();
+  const { canUploadFiles, dailyUploadLimitMB } = useRole();
   const [docs, setDocs] = useState<Document[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);

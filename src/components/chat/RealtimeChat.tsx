@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, CreditCard as Edit3, Trash2, MessageSquare, Shield, Scale, Phone, Hash, FileText, User, ChevronLeft, ChevronRight, Image as ImageIcon, AlertTriangle } from 'lucide-react';
+import { Send, CreditCard as Edit3, Trash2, MessageSquare, Shield, Scale, Phone, Hash, FileText, ChevronLeft, ChevronRight, Image as ImageIcon, AlertTriangle } from 'lucide-react';
 import { Button, Card, Badge, Modal } from '../atoms';
 import { sanitize } from '../../services/sanitize';
 import { supabase } from '../../services/supabase';
@@ -129,9 +129,9 @@ export function RealtimeChat({ cases, userId, push }: RealtimeChatProps) {
       }
 
       const path = `chat/${selectedCase.id}/${Date.now()}_${attachment.name}`;
-      const { error: uploadErr } = await supabase.storage.from('documents').upload(path, attachment);
+      const { error: uploadErr } = await supabase.storage.from('chat-attachments').upload(path, attachment);
       if (!uploadErr) {
-        const { data } = supabase.storage.from('documents').getPublicUrl(path);
+        const { data } = supabase.storage.from('chat-attachments').getPublicUrl(path);
         attachmentUrl = data?.publicUrl;
         attachmentType = attachment.type.startsWith('image/') ? 'image' : attachment.type.startsWith('video/') ? 'video' : undefined;
       } else {

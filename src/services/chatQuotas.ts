@@ -13,7 +13,7 @@ export const TIER_CHAT_QUOTAS: Record<Tier, ChatQuota> = {
   team: { maxImagesPerDay: Infinity, maxFileSizeMB: Infinity, isUnlimited: true },
 };
 
-export async function getDailyChatUploadCount(caseId: string, lawyerId: string): Promise<number> {
+export async function getDailyChatUploadCount(caseId: string, _lawyerId?: string): Promise<number> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 

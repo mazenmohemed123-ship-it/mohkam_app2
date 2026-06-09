@@ -18,6 +18,11 @@ type UserRole = 'lawyer' | 'client';
 const SESSION_KEY = 'mohkam_client_session';
 const ADMIN_ROUTE = '/admin-control-center';
 
+function parseFirmPortalPath(): string | null {
+  const match = window.location.pathname.match(/^\/portal\/lawyer\/([a-f0-9-]+)/i);
+  return match ? match[1] : null;
+}
+
 interface ClientSession {
   userId: string;
   phoneNumber: string;
@@ -36,6 +41,7 @@ function AppContent() {
   const params = new URLSearchParams(window.location.search);
   const urlLawyerId = params.get('join_lawyer');
   const inviteToken = params.get('client_invite_token');
+  const firmPortalLawyerId = parseFirmPortalPath();
 
   // Check for existing session
   useEffect(() => {
@@ -51,8 +57,8 @@ function AppContent() {
       return;
     }
 
-    // If we have invite URL params, go straight to client auth
-    if (urlLawyerId && inviteToken) {
+    // If we have invite URL params or firm portal path, go straight to client auth
+    if ((urlLawyerId && inviteToken) || firmPortalLawyerId) {
       setScreen('auth_client');
       setLoading(false);
       return;
@@ -197,15 +203,16 @@ function AppContent() {
   // Authenticated: show portal
   if (user && profile) {
     if (profile.role === 'client') {
-      return <ClientPortal user={user} profile={profile} onLogout={logout} urlLawyerId={urlLawyerId || profile.linked_lawyer_id} />;
+      return <ClientPortal user={user} profile={profile} onLogout={logout} urlLawyerId={urlLawyerId || firmPortalLawyerId || profile.linked_lawyer_id} />;
     }
     return <LawyerPortal user={user} profile={profile} onLogout={logout} />;
   }
 
   // Unauthenticated: show auth screens
   if (screen === 'auth_client') {
-    if (urlLawyerId) {
-      return <ClientZeroAuth lawyerId={urlLawyerId} inviteToken={inviteToken || undefined} onAuth={handleAuth} onBack={() => setScreen('role_gate')} />;
+    const effectiveLawyerId = urlLawyerId || firmPortalLawyerId;
+    if (effectiveLawyerId) {
+      return <ClientZeroAuth lawyerId={effectiveLawyerId} inviteToken={inviteToken || undefined} onAuth={handleAuth} onBack={() => setScreen('role_gate')} />;
     }
     // Client without invite link - show basic auth
     return <ClientZeroAuth lawyerId="" onAuth={handleAuth} onBack={() => setScreen('role_gate')} />;

@@ -8,9 +8,6 @@
  * - And other international formats
  */
 
-// International phone regex: optional + or 00 prefix, followed by 7-15 digits
-const GLOBAL_PHONE_REGEX = /^(\+|00)?[0-9][\d\s\-\(\)]{6,18}[0-9]$/;
-
 // Clean phone number (remove spaces, dashes, parentheses)
 export function cleanPhoneNumber(phone: string): string {
   return phone.replace(/[\s\-\(\)]/g, '');

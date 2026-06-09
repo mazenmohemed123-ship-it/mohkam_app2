@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Scale, LogOut, Phone, Calendar, AlertTriangle, Bot, Send, MessageSquare, Users, ChevronDown, CreditCard, Lock, Wallet, ArrowRight, Clock, ChevronLeft, AlertTriangle as AlertIcon } from 'lucide-react';
-import { Button, Card, Badge, Modal, Field, NotificationUI } from '../atoms';
+import { Scale, LogOut, Phone, Calendar, AlertTriangle, Bot, Send, MessageSquare, Users, ChevronDown, CreditCard, Lock, Wallet, ArrowRight, ChevronLeft } from 'lucide-react';
+import { Button, Card, Badge, Modal, NotificationUI } from '../atoms';
 import { supabase, sendPushToClient } from '../../services/supabase';
 import { checkFloodLimit } from '../../services/floodProtection';
 import { checkChatUploadQuota, getDailyChatUploadCount } from '../../services/chatQuotas';
 import { useNotifications } from '../../hooks/useNotifications';
 import { sanitize, sanitizeLike } from '../../services/sanitize';
-import { isValidGlobalPhone } from '../../services/phoneValidation';
 import { useCase } from '../../context/CaseContext';
 import type { Profile } from '../../context/RoleContext';
 
@@ -66,13 +65,6 @@ interface CaseInfo {
   admin_fees: number;
   lawyer_id: string;
 }
-
-/* Team members for Team plan dropdown */
-const TEAM_MEMBERS = [
-  { id: 'lawyer', label: 'الأستاذ الأساسي', icon: '👨‍⚖️' },
-  { id: 'secretary', label: 'السكرتارية', icon: '📋' },
-  { id: 'accountant', label: 'الحسابات', icon: '🧮' },
-];
 
 /* Days of week for appointment booking */
 const DAYS_OF_WEEK = [
@@ -151,10 +143,8 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
   const [activeChatLabel, setActiveChatLabel] = useState<string>('المساعد الذكي');
 
   /* Simplified appointment booking state */
-  const [showApptDropdown, setShowApptDropdown] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string>('');
-  const [timeFrom, setTimeFrom] = useState<string>('09:00');
-  const [timeTo, setTimeTo] = useState<string>('17:00');
+  const [selectedSlot, setSelectedSlot] = useState<string>('');
   const [apptSubmitted, setApptSubmitted] = useState(false);
 
   /* Payment state - Paymob */
@@ -191,11 +181,9 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
 
   /* Draggable bottom sheet state */
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [sheetY, setSheetY] = useState(0);
   const sheetRef = useRef<HTMLDivElement>(null);
 
   const chatDropdownRef = useRef<HTMLDivElement>(null);
-  const apptDropdownRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const { list: notifList, push } = useNotifications();
 
@@ -204,9 +192,6 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     const handler = (e: MouseEvent) => {
       if (chatDropdownRef.current && !chatDropdownRef.current.contains(e.target as Node)) {
         setShowChatDropdown(false);
-      }
-      if (apptDropdownRef.current && !apptDropdownRef.current.contains(e.target as Node)) {
-        setShowApptDropdown(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -313,6 +298,8 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
       .channel('messages:' + selectedCase.id)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `case_id=eq.${selectedCase.id}` }, (payload) => {
         const msg = payload.new as any;
+        // Ignore internal team chat — client should not see it
+        if (msg.room_type === 'internal_team_chat') return;
         // Detect system messages (emergency alerts)
         const isSystemMessage = msg.message_text?.startsWith('【') || msg.sender_role === 'system';
 
@@ -390,7 +377,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     if (attachment && selectedCase) {
       const fileSizeMB = attachment.size / (1024 * 1024);
       const dailyCount = await getDailyChatUploadCount(selectedCase.id, lawyerInfo?.id || '');
-      const quotaCheck = checkChatUploadQuota(lawyerTier, dailyCount, fileSizeMB);
+      const quotaCheck = checkChatUploadQuota(lawyerProfile?.tier || 'free', dailyCount, fileSizeMB);
       if (!quotaCheck.allowed) {
         setQuotaWarning(quotaCheck.reason || 'تم تجاوز الحد');
         return;
@@ -406,9 +393,9 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     // Handle file upload for human chat (not bot)
     if (attachment && selectedCase && activeChatTarget !== 'bot') {
       const path = `chat/${selectedCase.id}/${Date.now()}_${attachment.name}`;
-      const { error: uploadErr } = await supabase.storage.from('documents').upload(path, attachment);
+      const { error: uploadErr } = await supabase.storage.from('chat-attachments').upload(path, attachment);
       if (!uploadErr) {
-        const { data } = supabase.storage.from('documents').getPublicUrl(path);
+        const { data } = supabase.storage.from('chat-attachments').getPublicUrl(path);
         attachmentUrl = data?.publicUrl;
         attachmentType = attachment.type.startsWith('image/') ? 'image' : attachment.type.startsWith('video/') ? 'video' : undefined;
       }
@@ -447,9 +434,15 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     return `tel:${ussd}`;
   };
 
-  /* Open InstaPay app */
+  /* Open InstaPay app with deep-link to transfer */
   const openInstaPay = () => {
-    window.location.href = 'instapay://';
+    const address = lawyerPaymentInfo?.instapay_address;
+    if (address) {
+      // Try instapay:// scheme with transfer parameters
+      window.location.href = `instapay://transfer?to=${encodeURIComponent(address)}`;
+    } else {
+      window.location.href = 'instapay://';
+    }
   };
 
   /* Copy InstaPay ID */
@@ -504,12 +497,11 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
       push('اختر يوم الموعد', 'warning');
       return;
     }
-    if (!timeFrom || !timeTo) {
-      push('حدد وقت البداية والنهاية', 'warning');
+    if (!selectedSlot) {
+      push('اختر ساعة الموعد', 'warning');
       return;
     }
 
-    const timeRange = `${timeFrom} - ${timeTo}`;
     const dayLabel = DAYS_OF_WEEK.find(d => d.id === selectedDay)?.label || selectedDay;
     const lawyerId = lawyerInfo?.id || urlLawyerId || profile?.linked_lawyer_id;
     const clientName = profile?.full_name || selectedCase.client_name || 'موكل';
@@ -520,8 +512,8 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
       client_id: user.id,
       lawyer_id: lawyerId,
       appointment_date: selectedDay,
-      appointment_time: timeRange,
-      reason: `طلب موعد من ${clientName} | قضية: ${caseNumber} | ${dayLabel} (${timeRange})`,
+      appointment_time: selectedSlot,
+      reason: `طلب موعد من ${clientName} | قضية: ${caseNumber} | ${dayLabel} (${selectedSlot})`,
     }]);
 
     if (error) {
@@ -532,12 +524,11 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     await supabase.from('case_events').insert([{
       case_id: selectedCase.id,
       event_type: 'APPOINTMENT_REQUESTED',
-      event_description: `📅 طلب حجز موعد: ${clientName} (${caseNumber}) - ${dayLabel} (${timeRange})`,
+      event_description: `📅 طلب حجز موعد: ${clientName} (${caseNumber}) - ${dayLabel} (${selectedSlot})`,
     }]);
 
     push('✓ تم إرسال طلب الموعد', 'success');
     setApptSubmitted(true);
-    setShowApptDropdown(false);
   };
 
   const processPayment = () => {
@@ -565,13 +556,6 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
   const handleChatClick = () => {
     // Always show dropdown to let user choose bot or live chat
     setShowChatDropdown((v) => !v);
-  };
-
-  const selectTeamMember = (member: typeof TEAM_MEMBERS[0]) => {
-    setActiveChatTarget('staff');
-    setActiveChatLabel(member.label);
-    setShowChatDropdown(false);
-    setCurrentScreen('live_chat');
   };
 
   const selectBotMode = () => {
@@ -627,6 +611,17 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         </header>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10, background: '#FAFBFE' }}>
+          {activeChatTarget === 'bot' && (
+            <div style={{ padding: '10px 14px', background: 'linear-gradient(135deg, #EFF6FF, #F0F9FF)', borderRadius: 10, border: '1px solid #BFDBFE', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: '#3B82F6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Bot size={14} color="#fff" />
+              </div>
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 800, color: '#1D4ED8' }}>المساعد الذكي — وضع محلي</p>
+                <p style={{ fontSize: 10, color: '#6B7280' }}>لا يرسل بيانات — يعمل بدون إنترنت — منفصل عن المحادثة البشرية</p>
+              </div>
+            </div>
+          )}
           {msgs.map((msg) => {
             const isEmergency = msg.isEmergency || msg.text.startsWith('🆘') || msg.text.includes('【حالة طوارئ');
             const isSystem = msg.isSystem || msg.from === 'system' || msg.text.startsWith('【');
@@ -768,8 +763,45 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
             </div>
           </div>
 
-          {/* Aggregated Cases */}
-          {aggregatedCases.length > 0 && (
+          {/* Firm Staff Roster - only for Team tier */}
+        {lawyerTier === 'team' && teamMembers.length > 1 && (
+          <div className="fade-up" style={{ padding: '14px 18px', background: '#fff', borderRadius: 14, border: '1px solid var(--border)' }}>
+            <p style={{ fontSize: 12, fontWeight: 800, color: 'var(--navy)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Users size={14} /> فريق المكتب ({teamMembers.length})
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {teamMembers.map((m) => {
+                const roleInfo = FIRM_ROLES[m.role] || FIRM_ROLES.lawyer;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setActiveChatTarget('staff');
+                      setActiveChatLabel(m.full_name);
+                      setCurrentScreen('live_chat');
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 14px', borderRadius: 10,
+                      border: '1px solid var(--border)', background: '#F5F8FF',
+                      cursor: 'pointer', transition: 'all .15s',
+                    }}
+                  >
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                      {m.avatar_url ? <img src={m.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 13 }}>{roleInfo.icon}</span>}
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{m.full_name}</p>
+                      <p style={{ fontSize: 9, color: 'var(--muted)' }}>{roleInfo.label}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Aggregated Cases */}          {aggregatedCases.length > 0 && (
             <div className="fade-up" style={{ padding: '12px 18px', background: '#F5F8FF', borderTop: '1px solid var(--border)' }}>
               <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>قضاياك ({aggregatedCases.length})</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -822,7 +854,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         {/* UNIVERSAL APPOINTMENT BOOKING - Swipeable Bottom Sheet */}
         {selectedCase && (
           <>
-            <Button variant="gold" fullWidth onClick={() => setSheetOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+            <Button variant="gold" fullWidth onClick={() => { setSheetOpen(true); setSelectedSlot(''); }} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
               <Calendar size={16} /> {apptSubmitted ? `✓ تم إرسال الطلب` : 'حجز موعد'}
             </Button>
 
@@ -903,26 +935,43 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
                 </div>
               </div>
 
-              {/* Time Range */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-                <div>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>من الساعة</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', background: '#F5F8FF', borderRadius: 10, border: '1.5px solid var(--border)' }}>
-                    <Clock size={16} color="var(--navy)" />
-                    <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 15, fontFamily: "'JetBrains Mono', monospace" }} />
-                  </div>
-                </div>
-                <div>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>إلى الساعة</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', background: '#F5F8FF', borderRadius: 10, border: '1.5px solid var(--border)' }}>
-                    <Clock size={16} color="var(--navy)" />
-                    <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 15, fontFamily: "'JetBrains Mono', monospace" }} />
-                  </div>
+              {/* Time Slot Chips */}
+              <div style={{ marginBottom: 20 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>اختر الساعة</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {(() => {
+                    const [fromH] = workHours.from.split(':').map(Number);
+                    const [toH] = workHours.to.split(':').map(Number);
+                    const slots: string[] = [];
+                    for (let h = fromH; h <= toH; h++) {
+                      slots.push(`${h.toString().padStart(2, '0')}:00`);
+                    }
+                    return slots.map((slot) => {
+                      const [h] = slot.split(':').map(Number);
+                      const label = h >= 12 ? `${h > 12 ? h - 12 : h}:00 ${h >= 12 ? 'م' : 'ص'}` : `${h}:00 ص`;
+                      const isSelected = selectedSlot === slot;
+                      return (
+                        <button
+                          key={slot}
+                          onClick={() => setSelectedSlot(slot)}
+                          style={{
+                            padding: '10px 18px', borderRadius: 99,
+                            border: isSelected ? '2px solid var(--navy)' : '1px solid var(--border)',
+                            background: isSelected ? 'var(--navy)' : '#fff',
+                            cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+                            transition: 'all .15s',
+                          }}
+                        >
+                          <span style={{ fontSize: 13, fontWeight: 700, color: isSelected ? '#fff' : 'var(--text)' }}>{label}</span>
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 
-              <Button variant="gold" fullWidth onClick={() => { submitAppointment(); setSheetOpen(false); }} disabled={!selectedDay} style={{ padding: '16px 24px', fontSize: 16 }}>
-                {selectedDay ? 'تأكيد الحجز' : 'اختر اليوم أولاً'}
+              <Button variant="gold" fullWidth onClick={() => { submitAppointment(); setSheetOpen(false); }} disabled={!selectedDay || !selectedSlot} style={{ padding: '16px 24px', fontSize: 16 }}>
+                {selectedDay && selectedSlot ? 'تأكيد الحجز' : !selectedDay ? 'اختر اليوم أولاً' : 'اختر الساعة أولاً'}
               </Button>
             </div>
           </div>
@@ -980,7 +1029,13 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
                     <button onClick={copyInstaPayId} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#E0E8FF', color: '#635BFF', padding: '10px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                       📋 نسخ المعرّف
                     </button>
-                    <button onClick={openInstaPay} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#635BFF', color: '#fff', padding: '10px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                    <button onClick={() => {
+                      try { openInstaPay(); } catch {
+                        // Fallback: copy address
+                        copyInstaPayId();
+                        push('لم يتم فتح InstaPay — تم نسخ المعرّف بدلاً', 'warning');
+                      }
+                    }} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#635BFF', color: '#fff', padding: '10px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                       🚀 فتح InstaPay
                     </button>
                   </div>

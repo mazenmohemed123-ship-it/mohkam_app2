@@ -159,6 +159,22 @@ export function CaseProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteCase = useCallback(async (id: string): Promise<boolean> => {
+    // Cascade: delete associated storage files first
+    try {
+      const { data: docs } = await supabase.from('documents').select('storage_path').eq('case_id', id);
+      if (docs?.length) {
+        const paths = docs.map((d: any) => d.storage_path).filter(Boolean);
+        if (paths.length) await supabase.storage.from('documents').remove(paths);
+      }
+      const { data: chatFiles } = await supabase.from('messages').select('attachment_url').eq('case_id', id).not('attachment_url', 'is', null);
+      if (chatFiles?.length) {
+        const chatPaths = chatFiles.map((m: any) => {
+          try { return new URL(m.attachment_url).pathname.replace('/storage/v1/object/public/documents/', ''); } catch { return ''; }
+        }).filter(Boolean);
+        if (chatPaths.length) await supabase.storage.from('documents').remove(chatPaths);
+      }
+    } catch { /* storage cleanup best-effort */ }
+
     const { error } = await supabase.from('cases').delete().eq('id', id);
     if (!error) {
       setCases((prev) => prev.filter((c) => c.id !== id));

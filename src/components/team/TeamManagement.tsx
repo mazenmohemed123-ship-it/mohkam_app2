@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, Shield, Check, X, Trash2, Users, Pencil, Save, Mail, Phone, Lock } from 'lucide-react';
+import { UserPlus, Shield, Check, X, Trash2, Users, Pencil, Save, Lock } from 'lucide-react';
 import { Button, Card, Badge, Field, Spinner } from '../atoms';
 import { supabase } from '../../services/supabase';
 import { sanitize } from '../../services/sanitize';

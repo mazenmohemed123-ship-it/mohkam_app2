@@ -135,11 +135,6 @@ const TIERS: TierInfo[] = [
   { id: 'team', priceUSD: 50, icon: Users, color: 'var(--gold)', badge: { ar: 'مكاتب المحامين', en: 'Law Firms' } },
 ];
 
-/* Payment channels */
-const PAYMENT_CHANNELS = [
-  { id: 'card', icon: '💳', color: '#635BFF' },
-];
-
 function detectCurrency(): string {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -159,7 +154,7 @@ function detectLang(): 'ar' | 'en' {
 }
 
 export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: SubScreenProps) {
-  const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [upgrading] = useState<string | null>(null);
   const [currency, setCurrency] = useState<string>('USD');
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
   const { tier } = useRole();
@@ -218,7 +213,7 @@ export function SubScreen({ profile, onUpdateProfile, push, caseCount = 0 }: Sub
 
     try {
       /* Invoke Edge Function for checkout session */
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+      const { error } = await supabase.functions.invoke('create-checkout-session', {
         body: {
           tier: selectedTier.id,
           amount: selectedTier.priceUSD,

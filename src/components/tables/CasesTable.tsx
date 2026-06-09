@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, X, Copy, Link, Pencil, Check, Lock } from 'lucide-react';
-import { Button, Badge } from '../atoms';
+import { Plus, Trash2, X, Copy, Link, Check, Lock, AlertTriangle } from 'lucide-react';
+import { Button, Modal } from '../atoms';
 import { useRole } from '../../context/RoleContext';
 import { isCaseCreationBlocked, TIER_CASE_LIMITS } from '../../services/caseQuotas';
 
@@ -46,8 +46,8 @@ export function CasesTable({
   const [addColName, setAddColName] = useState('');
   const [showAddCol, setShowAddCol] = useState(false);
   const [hoveredCol, setHoveredCol] = useState<string | null>(null);
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
   const cellRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -132,8 +132,6 @@ export function CasesTable({
               <tr
                 key={row.id}
                 onClick={() => onRowClick(row)}
-                onMouseEnter={() => setHoveredRow(row.id)}
-                onMouseLeave={() => setHoveredRow(null)}
                 style={{
                   background: selectedId === row.id ? '#F5F8FF' : undefined,
                   cursor: 'pointer',
@@ -208,7 +206,7 @@ export function CasesTable({
                     </button>
                     {canDeleteCase && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(row.id); }}
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }}
                         style={{
                           background: 'transparent', border: '1px solid var(--border)',
                           borderRadius: 6, padding: '4px 8px', cursor: 'pointer',
@@ -270,6 +268,29 @@ export function CasesTable({
             باقتك محدودة بـ {TIER_CASE_LIMITS[tier] === Infinity ? '∞' : TIER_CASE_LIMITS[tier]} قضية. <strong style={{ color: 'var(--navy)', cursor: 'pointer' }}>قم بالترقية</strong> لإضافة المزيد.
           </span>
         </div>
+      )}
+
+      {deleteTarget && (
+        <Modal onClose={() => setDeleteTarget(null)}>
+          <div style={{ padding: 24, textAlign: 'center' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FDECEF', margin: '0 auto 14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle size={28} color="var(--danger)" />
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--danger)', marginBottom: 10 }}>حذف القضية نهائياً</h3>
+            <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.8, marginBottom: 6 }}>
+              سيتم حذف قضية <strong>{deleteTarget.case_number}</strong> لـ <strong>{deleteTarget.client_name || 'بدون اسم'}</strong>
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 20 }}>
+              سيتم حذف جميع الرسائل والمستندات والمواعيد المرتبطة نهائياً
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Button variant="danger" fullWidth onClick={() => { onDelete(deleteTarget.id); setDeleteTarget(null); }}>
+                <Trash2 size={14} /> حذف نهائي
+              </Button>
+              <Button variant="ghost" fullWidth onClick={() => setDeleteTarget(null)}>إلغاء</Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

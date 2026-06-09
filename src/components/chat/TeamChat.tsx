@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Send, Users, Shield, Image as ImageIcon } from 'lucide-react';
 import { Button, Spinner } from '../atoms';
-import { supabase } from '../../services/supabase';
+import { supabase, sendPushToClient } from '../../services/supabase';
 import { checkFloodLimit } from '../../services/floodProtection';
 import { sanitize } from '../../services/sanitize';
 
@@ -113,9 +113,9 @@ export function TeamChat({ masterLawyerId, userId, userRole, push }: TeamChatPro
 
     if (attachment) {
       const path = `team-chat/${effectiveTeamId}/${Date.now()}_${attachment.name}`;
-      const { error: uploadErr } = await supabase.storage.from('documents').upload(path, attachment);
+      const { error: uploadErr } = await supabase.storage.from('chat-attachments').upload(path, attachment);
       if (!uploadErr) {
-        const { data } = supabase.storage.from('documents').getPublicUrl(path);
+        const { data } = supabase.storage.from('chat-attachments').getPublicUrl(path);
         attachmentUrl = data?.publicUrl;
         attachmentType = attachment.type.startsWith('image/') ? 'image' : undefined;
       }
@@ -132,7 +132,16 @@ export function TeamChat({ masterLawyerId, userId, userRole, push }: TeamChatPro
       attachment_type: attachmentType,
     }]);
 
-    if (!error) setInput('');
+    if (!error) {
+      setInput('');
+      // Notify other team members
+      const senderName = members.find((m) => m.id === userId)?.full_name || 'عضو';
+      for (const m of members) {
+        if (m.id !== userId) {
+          sendPushToClient(m.id, `رسالة داخلية من ${senderName}`, safeText.slice(0, 80));
+        }
+      }
+    }
     else push('خطأ في الإرسال', 'danger');
     setSending(false);
   }, [input, effectiveTeamId, userId, userRole, push]);
