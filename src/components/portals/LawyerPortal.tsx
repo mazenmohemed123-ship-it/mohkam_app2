@@ -5,6 +5,7 @@ import { CasesTable } from '../tables/CasesTable';
 import { CaseTimeline } from '../cases/CaseTimeline';
 import { RealtimeChat } from '../chat/RealtimeChat';
 import { TeamChat } from '../chat/TeamChat';
+import { PeerChat } from '../chat/PeerChat';
 import { TeamManagement } from '../team/TeamManagement';
 import { SubScreen } from '../pricing/SubScreen';
 import { VoicePanel } from '../voice/VoicePanel';
@@ -14,6 +15,7 @@ import { useCase } from '../../context/CaseContext';
 import { supabase, registerPush } from '../../services/supabase';
 import { sanitize } from '../../services/sanitize';
 import { isCaseCreationBlocked, TIER_CASE_LIMITS } from '../../services/caseQuotas';
+import { CURRENCIES, getCurrencySymbol, formatCurrency, type CurrencyCode } from '../../services/currency';
 
 const DEFAULT_COLS = [
   { key: 'case_number', label: 'رقم القضية', type: 'text' },
@@ -41,6 +43,13 @@ interface LawyerAvailabilityData {
   available_days: string[];
   time_slots: string[];
   is_active: boolean;
+}
+
+interface Teammate {
+  id: string;
+  full_name: string;
+  role: string;
+  avatar_url?: string;
 }
 
 interface LawyerPortalProps {
@@ -78,8 +87,11 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   const [instapayAddress, setInstapayAddress] = useState(initProfile.instapay_address || '');
   const [instapayQRUrl, setInstapayQRUrl] = useState<string | null>(null);
   const [instapayQRPreview, setInstapayQRPreview] = useState<string | null>(null); // Local preview before upload
+  const [peerTarget, setPeerTarget] = useState<Teammate | null>(null);
+  const [teamDirectory, setTeamDirectory] = useState<Teammate[]>([]);
   const [bankDetails, setBankDetails] = useState(initProfile.bank_account_details || {});
   const [savingPayment, setSavingPayment] = useState(false);
+  const [currency, setCurrency] = useState<CurrencyCode>((initProfile as any).currency || 'EGP');
 
   const { list: notifList, push } = useNotifications();
   const { canViewChat, canViewCaseDetails, canManageBilling, tier, activeRole, setProfile: setCtxProfile } = useRole();
@@ -108,6 +120,19 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
   }, [commissionDebt]);
 
   useEffect(() => { loadCases(effectiveLawyerId); loadAppointments(effectiveLawyerId); }, [effectiveLawyerId, loadCases, loadAppointments]);
+
+  // Load team directory for peer chat
+  useEffect(() => {
+    if (tier !== 'team') return;
+    const loadTeam = async () => {
+      const { data } = await supabase.from('profiles')
+        .select('id, full_name, role, avatar_url')
+        .or(`id.eq.${effectiveLawyerId},master_lawyer_id.eq.${effectiveLawyerId}`)
+        .in('role', ['owner', 'partner', 'lawyer', 'assistant', 'secretary', 'accountant']);
+      if (data) setTeamDirectory(data.filter((m: any) => m.id !== user.id));
+    };
+    loadTeam();
+  }, [effectiveLawyerId, tier]);
 
   // Load availability
   useEffect(() => {
@@ -357,6 +382,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
         vodafone_cash_number: vodafoneCash || null,
         instapay_address: instapayAddress || null,
         bank_account_details: bankDetails,
+        currency: currency,
       })
       .eq('id', user.id);
     if (!error) {
@@ -365,6 +391,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
         vodafone_cash_number: vodafoneCash,
         instapay_address: instapayAddress,
         bank_account_details: bankDetails,
+        currency: currency,
       } : p);
       push('✓ تم حفظ بيانات الدفع', 'success');
     } else {
@@ -385,8 +412,8 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
 
   const stats = [
     { label: 'إجمالي القضايا', val: cases.length, color: 'var(--navy)' },
-    { label: 'إجمالي الأتعاب', val: cases.reduce((s, c) => s + (Number(c.total_fees) || 0), 0).toLocaleString() + ' ج', color: 'var(--gold)' },
-    { label: 'المصاريف الإدارية', val: cases.reduce((s, c) => s + (Number(c.admin_fees) || 0), 0).toLocaleString() + ' ج', color: 'var(--success)' },
+    { label: 'إجمالي الأتعاب', val: formatCurrency(cases.reduce((s, c) => s + (Number(c.total_fees) || 0), 0), currency), color: 'var(--gold)' },
+    { label: 'المصاريف الإدارية', val: formatCurrency(cases.reduce((s, c) => s + (Number(c.admin_fees) || 0), 0), currency), color: 'var(--success)' },
     { label: 'قيد الانتظار', val: cases.filter((c) => /انتظار|قيد/.test(c.judgment || '')).length, color: 'var(--warning)' },
   ];
 
@@ -414,7 +441,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
             <p style={{ fontSize: 14, color: 'var(--text)', marginBottom: 20, lineHeight: 1.8 }}>
               {isFrozen
                 ? 'تم تجميد حسابك بواسطة الإدارة. يرجى التواصل مع الدعم للحل.'
-                : `رصيد العمولة المستحق: ${commissionDebt.toLocaleString()} ج. يجب تسديد المبلغ لاستخدام المنصة.`}
+                : `رصيد العمولة المستحق: ${formatCurrency(commissionDebt, currency)}. يجب تسديد المبلغ لاستخدام المنصة.`}
             </p>
             <div style={{ background: '#F5F8FF', borderRadius: 12, padding: 16, marginBottom: 20 }}>
               <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>طريقة التسديد</p>
@@ -589,17 +616,65 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
 
         {tab === 'team' && tier === 'team' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <TeamChat
-              masterLawyerId={effectiveLawyerId}
-              userId={user.id}
-              userRole={activeRole}
-              push={push}
-            />
-            {isMasterLawyer && (
-              <TeamManagement
-                masterLawyerId={user.id}
+            {peerTarget ? (
+              <PeerChat
+                masterLawyerId={effectiveLawyerId}
+                userId={user.id}
+                target={peerTarget}
+                onBack={() => setPeerTarget(null)}
                 push={push}
               />
+            ) : (
+              <>
+                <TeamChat
+                  masterLawyerId={effectiveLawyerId}
+                  userId={user.id}
+                  userRole={activeRole}
+                  push={push}
+                />
+                {/* Peer-to-Peer Staff Directory */}
+                {teamDirectory.length > 0 && (
+                  <Card style={{ padding: 18 }}>
+                    <h3 style={{ fontWeight: 800, color: 'var(--navy)', fontSize: 15, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Users size={16} /> دليل الفريق — محادثة خاصة
+                    </h3>
+                    <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>اضغط على أي عضو لفتح محادثة مباشرة وآمنة</p>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {teamDirectory.map((m) => {
+                        const roleIcon = m.role === 'partner' ? '🏛️' : m.role === 'lawyer' ? '⚖️' : m.role === 'secretary' ? '📋' : m.role === 'accountant' ? '🧮' : '🤝';
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => setPeerTarget(m)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '10px 16px', borderRadius: 12,
+                              border: '1px solid var(--border)', background: '#FAFBFE',
+                              cursor: 'pointer', transition: 'all .15s',
+                            }}
+                          >
+                            <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                              {m.avatar_url ? <img src={m.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 16 }}>{roleIcon}</span>}
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{m.full_name}</p>
+                              <p style={{ fontSize: 10, color: 'var(--muted)' }}>
+                                {m.role === 'partner' ? 'شريك' : m.role === 'lawyer' ? 'محامي' : m.role === 'secretary' ? 'سكرتير' : m.role === 'accountant' ? 'محاسب' : 'مساعد'}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                )}
+                {isMasterLawyer && (
+                  <TeamManagement
+                    masterLawyerId={user.id}
+                    push={push}
+                  />
+                )}
+              </>
             )}
           </div>
         )}
@@ -619,16 +694,16 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
                 <Card style={{ padding: 16, background: '#FFFBEB' }}>
                   <p style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>إجمالي الأتعاب</p>
-                  <p style={{ fontSize: 24, fontWeight: 900, color: 'var(--gold)', fontFamily: "'JetBrains Mono', monospace" }}>{cases.reduce((s, c) => s + (Number(c.total_fees) || 0), 0).toLocaleString()} ج</p>
+                  <p style={{ fontSize: 24, fontWeight: 900, color: 'var(--gold)', fontFamily: "'JetBrains Mono', monospace" }}>{formatCurrency(cases.reduce((s, c) => s + (Number(c.total_fees) || 0), 0), currency)}</p>
                 </Card>
                 <Card style={{ padding: 16, background: '#E6F7EF' }}>
                   <p style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>المصاريف الإدارية</p>
-                  <p style={{ fontSize: 24, fontWeight: 900, color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>{cases.reduce((s, c) => s + (Number(c.admin_fees) || 0), 0).toLocaleString()} ج</p>
+                  <p style={{ fontSize: 24, fontWeight: 900, color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>{formatCurrency(cases.reduce((s, c) => s + (Number(c.admin_fees) || 0), 0), currency)}</p>
                 </Card>
                 <Card style={{ padding: 16, background: '#F5F8FF' }}>
                   <p style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>صافي الإيرادات</p>
                   <p style={{ fontSize: 24, fontWeight: 900, color: 'var(--navy)', fontFamily: "'JetBrains Mono', monospace" }}>
-                    {(cases.reduce((s, c) => s + (Number(c.total_fees) || 0), 0) - cases.reduce((s, c) => s + (Number(c.admin_fees) || 0), 0)).toLocaleString()} ج
+                    {formatCurrency(cases.reduce((s, c) => s + (Number(c.total_fees) || 0), 0) - cases.reduce((s, c) => s + (Number(c.admin_fees) || 0), 0), currency)}
                   </p>
                 </Card>
               </div>
@@ -643,7 +718,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
                 <div style={{ flex: 1 }}>
                   <p style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>عمولة المنصة المستحقة</p>
                   <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--danger)', fontFamily: "'JetBrains Mono', monospace" }}>
-                    {(profile as any).commission_debt?.toLocaleString() || 0} ج
+                    {formatCurrency((profile as any).commission_debt || 0, currency)}
                   </p>
                 </div>
               </div>
@@ -667,9 +742,9 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.case_number} - {c.client_name || 'بدون اسم'}</p>
                         <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-                          <span style={{ fontSize: 11, color: 'var(--muted)' }}>الأتعاب: <strong style={{ color: 'var(--navy)' }}>{totalFees.toLocaleString()} ج</strong></span>
-                          <span style={{ fontSize: 11, color: 'var(--danger)' }}>العمولة: <strong>{commission.toLocaleString()} ج</strong></span>
-                          <span style={{ fontSize: 11, color: 'var(--success)' }}>الصافي: <strong>{netAmount.toLocaleString()} ج</strong></span>
+                          <span style={{ fontSize: 11, color: 'var(--muted)' }}>الأتعاب: <strong style={{ color: 'var(--navy)' }}>{formatCurrency(totalFees, currency)}</strong></span>
+                          <span style={{ fontSize: 11, color: 'var(--danger)' }}>العمولة: <strong>{formatCurrency(commission, currency)}</strong></span>
+                          <span style={{ fontSize: 11, color: 'var(--success)' }}>الصافي: <strong>{formatCurrency(netAmount, currency)}</strong></span>
                         </div>
                       </div>
                       <Button
@@ -680,7 +755,7 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
                           if (!error) {
                             const currentDebt = (profile as any).commission_debt || 0;
                             setProfile((p) => p ? { ...p, commission_debt: currentDebt + commission } : p);
-                            push(`✓ تم تأكيد استلام ${totalFees.toLocaleString()} ج (عمولة: ${commission.toLocaleString()} ج)`, 'success');
+                            push(`✓ تم تأكيد استلام ${formatCurrency(totalFees, currency)} (عمولة: ${formatCurrency(commission, currency)})`, 'success');
                           } else {
                             push('خطأ في تأكيد الدفعة', 'danger');
                           }
@@ -884,6 +959,29 @@ export function LawyerPortal({ user, profile: initProfile, onLogout }: LawyerPor
                 <Wallet size={18} /> بيانات الدفع البديلة
               </h3>
               <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>أضف بياناتك ليتمكن الموكلون من التحويل إليك مباشرة</p>
+
+              {/* Currency Selector */}
+              <div style={{ marginBottom: 16, padding: '12px', background: '#F5F8FF', borderRadius: 12, border: '1px solid #E0E8FF' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontSize: 18 }}>💱</span>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 800, color: 'var(--navy)' }}>عملة المكتب</p>
+                    <p style={{ fontSize: 10, color: 'var(--muted)' }}>تظهر في كل الفواتير والمدفوعات</p>
+                  </div>
+                </div>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+                  style={{
+                    width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)',
+                    borderRadius: 10, fontSize: 13, background: '#fff', fontFamily: "'Cairo',sans-serif",
+                  }}
+                >
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>{c.symbol} — {c.arLabel} ({c.code})</option>
+                  ))}
+                </select>
+              </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {/* Vodafone Cash */}

@@ -24,6 +24,8 @@ interface TeamManagementProps {
   push: (msg: string, type: 'success' | 'warning' | 'danger') => void;
 }
 
+const FIRM_CAP = 6;
+
 const STAFF_ROLES = [
   { id: 'assistant', label: 'مساعد قانوني', icon: '🤝' },
   { id: 'secretary', label: 'سكرتير/ة', icon: '📋' },
@@ -73,6 +75,10 @@ export function TeamManagement({ masterLawyerId, push }: TeamManagementProps) {
   };
 
   const handleAddStaff = async () => {
+    if (staff.length >= FIRM_CAP) {
+      push(`⚠️ تم بلوغ الحد الأقصى (${FIRM_CAP} أعضاء). قم بالترقية لإضافة المزيد.`, 'warning');
+      return;
+    }
     if (!addName.trim() || !addEmail.trim() || !addPassword.trim()) {
       push('يرجى تعبئة جميع الحقول', 'warning');
       return;
@@ -180,13 +186,21 @@ export function TeamManagement({ masterLawyerId, push }: TeamManagementProps) {
             <Users size={20} /> إدارة فريق المكتب
           </h3>
           <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-            {staff.length} عضو في الفريق
+            {staff.length}/{FIRM_CAP} عضو في الفريق
           </p>
         </div>
-        <Button variant="gold" onClick={() => setShowAddForm(!showAddForm)}>
-          <UserPlus size={14} /> إضافة عضو
+        <Button variant="gold" onClick={() => setShowAddForm(!showAddForm)} disabled={staff.length >= FIRM_CAP} style={{ opacity: staff.length >= FIRM_CAP ? 0.5 : 1 }}>
+          <UserPlus size={14} /> {staff.length >= FIRM_CAP ? 'تم بلوغ الحد' : 'إضافة عضو'}
         </Button>
       </div>
+
+      {/* Capacity Warning */}
+      {staff.length >= FIRM_CAP && (
+        <div style={{ padding: '12px 16px', background: '#FFFBEB', borderRadius: 10, border: '1px solid #FDE68A', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Lock size={16} color="var(--warning)" />
+          <span style={{ fontSize: 12, color: 'var(--text)' }}>وصلت للحد الأقصى من الأعضاء ({FIRM_CAP}). لحذف عضو موجود يمكن إضافة عضو جديد.</span>
+        </div>
+      )}
 
       {/* Add Staff Form */}
       {showAddForm && (

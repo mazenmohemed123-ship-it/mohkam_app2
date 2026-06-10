@@ -8,6 +8,8 @@ import { useNotifications } from '../../hooks/useNotifications';
 import { sanitize, sanitizeLike } from '../../services/sanitize';
 import { useCase } from '../../context/CaseContext';
 import type { Profile } from '../../context/RoleContext';
+import { formatCurrency, getCurrencySymbol, type CurrencyCode } from '../../services/currency';
+import { useLocale, type AppLocale } from '../../hooks/useLocale';
 
 interface ClientPortalProps {
   user: any;
@@ -122,6 +124,7 @@ const detailsStyle = `
 `;
 
 export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPortalProps) {
+  const { locale } = useLocale();
   /* Full-screen mobile chat routing state */
   const [currentScreen, setCurrentScreen] = useState<'hub' | 'live_chat'>('hub');
 
@@ -380,9 +383,9 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         const c = data[0];
         setSelectedCase(c);
         setAggregatedCases((prev) => prev.some(ac => ac.id === c.id) ? prev : [...prev, c]);
-        if (lang === 'en') return `✅ Found your case!\n\n📋 Number: ${sanitize(c.case_number)}\n👤 Name: ${sanitize(c.client_name || '')}\n⚖️ Type: ${c.case_type || '—'}\n📌 Judgment: ${c.judgment}\n💰 Fees: ${Number(c.total_fees).toLocaleString()} EGP\n📊 Expenses: ${Number(c.admin_fees).toLocaleString()} EGP`;
-        if (lang === 'fr') return `✅ Dossier trouvé !\n\n📋 Numéro: ${sanitize(c.case_number)}\n👤 Nom: ${sanitize(c.client_name || '')}\n⚖️ Type: ${c.case_type || '—'}\n📌 Jugement: ${c.judgment}\n💰 Honoraires: ${Number(c.total_fees).toLocaleString()} EGP\n📊 Frais: ${Number(c.admin_fees).toLocaleString()} EGP`;
-        return `✅ وجدت قضيتك!\n\n📋 الرقم: ${sanitize(c.case_number)}\n👤 الاسم: ${sanitize(c.client_name || '')}\n⚖️ النوع: ${c.case_type || '—'}\n📌 الحكم: ${c.judgment}\n💰 الأتعاب: ${Number(c.total_fees).toLocaleString()} ج\n📊 المصاريف: ${Number(c.admin_fees).toLocaleString()} ج`;
+        if (lang === 'en') return `✅ Found your case!\n\n📋 Number: ${sanitize(c.case_number)}\n👤 Name: ${sanitize(c.client_name || '')}\n⚖️ Type: ${c.case_type || '—'}\n📌 Judgment: ${c.judgment}\n💰 Fees: ${formatCurrency(Number(c.total_fees), lawyerCurrency)}\n📊 Expenses: ${formatCurrency(Number(c.admin_fees), lawyerCurrency)}`;
+        if (lang === 'fr') return `✅ Dossier trouvé !\n\n📋 Numéro: ${sanitize(c.case_number)}\n👤 Nom: ${sanitize(c.client_name || '')}\n⚖️ Type: ${c.case_type || '—'}\n📌 Jugement: ${c.judgment}\n💰 Honoraires: ${formatCurrency(Number(c.total_fees), lawyerCurrency)}\n📊 Frais: ${formatCurrency(Number(c.admin_fees), lawyerCurrency)}`;
+        return `✅ وجدت قضيتك!\n\n📋 الرقم: ${sanitize(c.case_number)}\n👤 الاسم: ${sanitize(c.client_name || '')}\n⚖️ النوع: ${c.case_type || '—'}\n📌 الحكم: ${c.judgment}\n💰 الأتعاب: ${formatCurrency(Number(c.total_fees), lawyerCurrency)}\n📊 المصاريف: ${formatCurrency(Number(c.admin_fees), lawyerCurrency)}`;
       }
       if (lang === 'en') return `❌ No case found with number "${safeNum}"\nPlease double-check and try again.`;
       if (lang === 'fr') return `❌ Aucun dossier trouvé avec le numéro "${safeNum}"\nVeuillez vérifier et réessayer.`;
@@ -499,8 +502,16 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     const vodafoneNumber = lawyerPaymentInfo?.vodafone_cash_number;
     if (!vodafoneNumber) return null;
     // USSD format: *9*7*NUMBER*AMOUNT#
-    const ussd = `*9*7*${vodafoneNumber.replace(/\D/g, '')}*${amount}%23`;
+    const digits = vodafoneNumber.replace(/\D/g, '');
+    const ussd = `*9*7*${digits}*${amount}%23`;
     return `tel:${ussd}`;
+  };
+
+  const triggerVodafoneCash = (amount: number) => {
+    const digits = lawyerPaymentInfo?.vodafone_cash_number?.replace(/\D/g, '');
+    if (!digits) return;
+    const ussd = `*9*7*${digits}*${amount}#`;
+    window.location.href = `tel:${encodeURIComponent(ussd).replace(/%23/g, '#')}`;
   };
 
   /* Open InstaPay app with deep-link to transfer */
@@ -619,6 +630,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
   const LAWYER_PHONE = lawyerInfo?.phone_number || '';
   const LAWYER_AVATAR = lawyerInfo?.avatar_url;
   const lawyerTier = lawyerProfile?.tier || 'free';
+  const lawyerCurrency: CurrencyCode = (lawyerProfile as any)?.currency || 'EGP';
 
   const totalFees = selectedCase ? Number(selectedCase.total_fees) || 0 : 0;
   const amountPaid = Math.floor(totalFees * 0.3);
@@ -907,16 +919,16 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
                 <div className="details-content">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <span style={{ fontSize: 12, color: 'var(--text)' }}>إجمالي الأتعاب</span>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--navy)', fontFamily: "'JetBrains Mono', monospace" }}>{totalFees.toLocaleString()} ج</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--navy)', fontFamily: "'JetBrains Mono', monospace" }}>{formatCurrency(totalFees, lawyerCurrency)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <span style={{ fontSize: 12, color: 'var(--text)' }}>المدفوع</span>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>{amountPaid.toLocaleString()} ج</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>{formatCurrency(amountPaid, lawyerCurrency)}</span>
                   </div>
                   <div style={{ height: 1, background: 'var(--border)', margin: '8px 0' }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>المتبقي</span>
-                    <span style={{ fontSize: 15, fontWeight: 900, color: 'var(--danger)', fontFamily: "'JetBrains Mono', monospace" }}>{amountRemaining.toLocaleString()} ج</span>
+                    <span style={{ fontSize: 15, fontWeight: 900, color: 'var(--danger)', fontFamily: "'JetBrains Mono', monospace" }}>{formatCurrency(amountRemaining, lawyerCurrency)}</span>
                   </div>
                   <div style={{ marginTop: 10, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
                     <div style={{ height: '100%', borderRadius: 3, background: 'var(--success)', width: `${totalFees ? (amountPaid / totalFees) * 100 : 0}%`, transition: 'width .5s ease' }} />
@@ -1074,9 +1086,12 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
                   </div>
                   <p style={{ fontSize: 14, fontWeight: 900, color: 'var(--text)', fontFamily: "'JetBrains Mono', monospace", direction: 'ltr', textAlign: 'center', marginBottom: 10 }}>{lawyerPaymentInfo.vodafone_cash_number}</p>
                   {amountRemaining > 0 && (
-                    <a href={getVodafoneUSSD(amountRemaining)!} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#E60000', color: '#fff', padding: '12px 20px', borderRadius: 10, textDecoration: 'none', fontWeight: 800, fontSize: 14 }}>
-                      <Phone size={16} /> تحويل {amountRemaining.toLocaleString()} ج
-                    </a>
+                    <button
+                      onClick={() => triggerVodafoneCash(amountRemaining)}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#E60000', color: '#fff', padding: '12px 20px', borderRadius: 10, border: 'none', fontWeight: 800, fontSize: 14, cursor: 'pointer', width: '100%' }}
+                    >
+                      <Phone size={16} /> تحويل {formatCurrency(amountRemaining, lawyerCurrency)}
+                    </button>
                   )}
                 </div>
               )}
@@ -1195,7 +1210,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
             <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ background: '#FFFBEB', borderRadius: 10, padding: '12px 16px', textAlign: 'center' }}>
                 <p style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>المبلغ المتبقي</p>
-                <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--gold)', fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>{amountRemaining.toLocaleString()} ج</p>
+                <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--gold)', fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>{formatCurrency(amountRemaining, lawyerCurrency)}</p>
               </div>
 
               <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>اختر طريقة الدفع</p>
@@ -1212,7 +1227,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: '#F5F8FF', borderRadius: 8 }}><Lock size={12} color="var(--navy)" /><span style={{ fontSize: 11, color: 'var(--muted)' }}>معاملات Paymob مشفرة ومحمية</span></div>
 
               <Button variant="gold" fullWidth disabled={!selectedChannel || paymentProcessing} onClick={processPayment} style={{ padding: '14px 24px', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                {paymentProcessing ? <><span className="spin" style={{ display: 'inline-block', width: 16, height: 16, border: '2.5px solid rgba(255,255,255,.3)', borderTopColor: '#fff', borderRadius: '50%' }} /> جاري المعالجة...</> : <><CreditCard size={16} /> ادفع {amountRemaining.toLocaleString()} ج</>}
+                {paymentProcessing ? <><span className="spin" style={{ display: 'inline-block', width: 16, height: 16, border: '2.5px solid rgba(255,255,255,.3)', borderTopColor: '#fff', borderRadius: '50%' }} /> جاري المعالجة...</> : <><CreditCard size={16} /> ادفع {formatCurrency(amountRemaining, lawyerCurrency)}</>}
               </Button>
             </div>
           )}

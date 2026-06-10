@@ -41,6 +41,7 @@ export interface Profile {
     country?: string;
     [key: string]: any;
   };
+  currency?: string;
 }
 
 interface RoleContextType {
