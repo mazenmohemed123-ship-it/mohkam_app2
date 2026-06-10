@@ -127,7 +127,8 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
 
   const [lawyerInfo, setLawyerInfo] = useState<any>(null);
   const [lawyerProfile, setLawyerProfile] = useState<Profile | null>(null);
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  const [botMsgs, setBotMsgs] = useState<ChatMsg[]>([]);
+  const [humanMsgs, setHumanMsgs] = useState<ChatMsg[]>([]);
   const { triggerEmergency } = useCase();
   const [input, setInput] = useState('');
   const [aggregatedCases, setAggregatedCases] = useState<CaseInfo[]>([]);
@@ -185,6 +186,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
 
   const chatDropdownRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { list: notifList, push } = useNotifications();
 
   /* Close dropdowns on outside click */
@@ -219,9 +221,9 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
             });
           }
           const lawyerName = data.full_name || 'المحامي';
-          setMsgs([{
+          setBotMsgs([{
             id: 'w', from: 'bot',
-            text: `مرحباً، أنا مساعد الأستاذ ${lawyerName}. كيف أقدر أساعدك؟`,
+            text: `مرحباً، أنا مساعد الأستاذ ${lawyerName}. كيف أقدر أساعدك؟\nHello! I'm Mr. ${lawyerName}'s assistant. How can I help?\nBonjour ! Je suis l'assistant de Me ${lawyerName}. Comment puis-je vous aider ?`,
             time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
           }]);
         }
@@ -244,9 +246,10 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
       });
 
     // Fetch lawyer's QR code for InstaPay
-    supabase.storage.from('documents').list(`qr-codes/${lawyerId}`).then(({ data: qrData }) => {
-      if (qrData && qrData.length > 0) {
-        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(`qr-codes/${lawyerId}/${qrData[0].name}`);
+    supabase.storage.from('documents').list(`qr-codes/${lawyerId}`).then(({ data: qrData, error: qrErr }) => {
+      if (!qrErr && qrData && qrData.length > 0) {
+        const latest = qrData.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(`qr-codes/${lawyerId}/${latest.name}`);
         if (urlData?.publicUrl) {
           setLawyerPaymentInfo((prev) => prev ? { ...prev, instapay_qr_url: urlData.publicUrl } : { instapay_qr_url: urlData.publicUrl });
         }
@@ -304,18 +307,21 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         const isSystemMessage = msg.message_text?.startsWith('【') || msg.sender_role === 'system';
 
         if (msg.sender_id !== user.id || isSystemMessage) {
-          setMsgs((prev) => [...prev, {
-            id: msg.id,
-            from: isSystemMessage ? 'system' : msg.sender_role === 'lawyer' ? 'lawyer' : msg.sender_role === 'staff' || msg.sender_role === 'secretary' || msg.sender_role === 'accountant' ? 'staff' : 'lawyer',
-            text: msg.message_text,
-            time: new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-            attachment_url: msg.attachment_url,
-            attachment_type: msg.attachment_type,
-            isSystem: isSystemMessage,
-            isEmergency: msg.message_text?.includes('طوارئ') || msg.message_text?.includes('🆘'),
-            sender_id: msg.sender_id,
-            sender_role: msg.sender_role,
-          }]);
+          setHumanMsgs((prev) => {
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [...prev, {
+              id: msg.id,
+              from: isSystemMessage ? 'system' : msg.sender_role === 'lawyer' ? 'lawyer' : msg.sender_role === 'staff' || msg.sender_role === 'secretary' || msg.sender_role === 'accountant' ? 'staff' : 'lawyer',
+              text: msg.message_text,
+              time: new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+              attachment_url: msg.attachment_url,
+              attachment_type: msg.attachment_type,
+              isSystem: isSystemMessage,
+              isEmergency: msg.message_text?.includes('طوارئ') || msg.message_text?.includes('🆘'),
+              sender_id: msg.sender_id,
+              sender_role: msg.sender_role,
+            }];
+          });
         }
       })
       .subscribe();
@@ -344,12 +350,29 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
     return () => { ch.unsubscribe(); };
   }, [user.id, push]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [botMsgs, humanMsgs]);
 
   /* LOCAL BOT PROCESSING - No database inserts for bot inquiries */
+  type Lang = 'ar' | 'en' | 'fr';
+
+  const detectLang = (text: string): Lang => {
+    const t = text.trim().toLowerCase();
+    // French detection first (distinctive words)
+    if (/\b(bonjour|salut|aide|merci|urgence|rendez|dossier|honoraires|jugement|avocat|conseil|oui|non|comment|pourquoi)\b/i.test(t)) return 'fr';
+    // English detection
+    if (/\b(hello|hi|hey|help|emergency|appointment|schedule|case|fees|judgment|thanks|thank|please|what|how|when|where|can|need|want|good|morning|evening)\b/i.test(t)) return 'en';
+    // Arabic detection
+    if (/[\u0600-\u06FF]/.test(t)) return 'ar';
+    // Latin characters default to English
+    if (/[a-zA-Z]/.test(t)) return 'en';
+    return 'ar';
+  };
+
   const botReply = async (text: string): Promise<string> => {
     const t = text.trim();
+    const lang = detectLang(t);
     const num = t.match(/\b([A-Za-z]{0,5}[\-]?\d{3,})\b/i)?.[1] || t.match(/\b(\d{4,})\b/)?.[1];
+
     if (num) {
       const safeNum = sanitizeLike(num);
       const { data, error } = await supabase.from('cases').select('*').ilike('case_number', `%${safeNum}%`).limit(1);
@@ -357,14 +380,47 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         const c = data[0];
         setSelectedCase(c);
         setAggregatedCases((prev) => prev.some(ac => ac.id === c.id) ? prev : [...prev, c]);
+        if (lang === 'en') return `✅ Found your case!\n\n📋 Number: ${sanitize(c.case_number)}\n👤 Name: ${sanitize(c.client_name || '')}\n⚖️ Type: ${c.case_type || '—'}\n📌 Judgment: ${c.judgment}\n💰 Fees: ${Number(c.total_fees).toLocaleString()} EGP\n📊 Expenses: ${Number(c.admin_fees).toLocaleString()} EGP`;
+        if (lang === 'fr') return `✅ Dossier trouvé !\n\n📋 Numéro: ${sanitize(c.case_number)}\n👤 Nom: ${sanitize(c.client_name || '')}\n⚖️ Type: ${c.case_type || '—'}\n📌 Jugement: ${c.judgment}\n💰 Honoraires: ${Number(c.total_fees).toLocaleString()} EGP\n📊 Frais: ${Number(c.admin_fees).toLocaleString()} EGP`;
         return `✅ وجدت قضيتك!\n\n📋 الرقم: ${sanitize(c.case_number)}\n👤 الاسم: ${sanitize(c.client_name || '')}\n⚖️ النوع: ${c.case_type || '—'}\n📌 الحكم: ${c.judgment}\n💰 الأتعاب: ${Number(c.total_fees).toLocaleString()} ج\n📊 المصاريف: ${Number(c.admin_fees).toLocaleString()} ج`;
       }
+      if (lang === 'en') return `❌ No case found with number "${safeNum}"\nPlease double-check and try again.`;
+      if (lang === 'fr') return `❌ Aucun dossier trouvé avec le numéro "${safeNum}"\nVeuillez vérifier et réessayer.`;
       return `❌ مش لاقي قضية بالرقم "${safeNum}"\nتأكد من الرقم وحاول تاني.`;
     }
-    if (/مرحب|أهلاً|هلو|السلام|صباح|مساء/.test(t)) return `وعليكم السلام! 😊\nأرسل رقم قضيتك وهديك كل التفاصيل.`;
-    if (/مواعيد|وقت|جلسة/.test(t)) return `مواعيد المكتب: السبت – الخميس ٩ص – ٥م\nللتواصل: ${lawyerInfo?.phone_number || ''}`;
-    if (/شكر|جزاك|ربنا/.test(t)) return 'وإياك! ربنا يوفقك 🙏';
-    if (/طوارئ|عاجل|مساعدة/.test(t)) return 'اضغط على زر الطوارئ الأحمر وهيوصل طلبك للمحامي فوراً 🆘';
+
+    // Greetings
+    if (/مرحب|أهلاً|هلو|السلام|صباح|مساء/.test(t) || /\b(hello|hi|hey|good morning|good evening)\b/i.test(t) || /\b(bonjour|salut)\b/i.test(t)) {
+      if (lang === 'en') return `Hello! 😊\nSend me your case number and I'll give you all the details.`;
+      if (lang === 'fr') return `Bonjour ! 😊\nEnvoyez-moi le numéro de votre dossier et je vous donnerai tous les détails.`;
+      return `وعليكم السلام! 😊\nأرسل رقم قضيتك وهديك كل التفاصيل.`;
+    }
+
+    // Schedule / appointments
+    if (/مواعيد|وقت|جلسة/.test(t) || /\b(schedule|appointment|office hours|timing)\b/i.test(t) || /\b(rendez|horaires|disponibilité)\b/i.test(t)) {
+      const phone = lawyerInfo?.phone_number || '';
+      if (lang === 'en') return `Office hours: Saturday – Thursday, 9 AM – 5 PM\nContact: ${phone}`;
+      if (lang === 'fr') return `Horaires du cabinet : Samedi – Jeudi, 9h – 17h\nContact : ${phone}`;
+      return `مواعيد المكتب: السبت – الخميس ٩ص – ٥م\nللتواصل: ${phone}`;
+    }
+
+    // Thanks
+    if (/شكر|جزاك|ربنا/.test(t) || /\b(thanks|thank you|appreciate)\b/i.test(t) || /\b(merci|je vous remercie)\b/i.test(t)) {
+      if (lang === 'en') return "You're welcome! Best of luck 🙏";
+      if (lang === 'fr') return "Je vous en prie ! Bonne chance 🙏";
+      return 'وإياك! ربنا يوفقك 🙏';
+    }
+
+    // Emergency
+    if (/طوارئ|عاجل|مساعدة/.test(t) || /\b(emergency|urgent|help|sos)\b/i.test(t) || /\b(urgence|urgent|aide|secours)\b/i.test(t)) {
+      if (lang === 'en') return 'Press the red emergency button and your request will reach the lawyer immediately 🆘';
+      if (lang === 'fr') return 'Appuyez sur le bouton d\'urgence rouge et votre demande parviendra à l\'avocat immédiatement 🆘';
+      return 'اضغط على زر الطوارئ الأحمر وهيوصل طلبك للمحامي فوراً 🆘';
+    }
+
+    // Fallback
+    if (lang === 'en') return "I didn't quite understand that 😅\nTry:\n• Send your case number\n• Type \"schedule\" for office hours\n• Type \"emergency\" for help";
+    if (lang === 'fr') return "Je n'ai pas bien compris 😅\nEssayez :\n• Envoyez le numéro de votre dossier\n• Tapez \"horaires\" pour les heures du cabinet\n• Tapez \"urgence\" pour de l'aide";
     return 'مش فاهم سؤالك 😅\nجرب:\n• إرسال رقم القضية\n• اكتب "مواعيد" للمواعيد\n• اكتب "طوارئ" للمساعدة';
   };
 
@@ -389,6 +445,13 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
 
     let attachmentUrl: string | undefined;
     let attachmentType: 'image' | 'video' | undefined;
+    let localPreviewUrl: string | undefined;
+
+    // Create immediate local preview for any attachment
+    if (attachment) {
+      localPreviewUrl = URL.createObjectURL(attachment);
+      attachmentType = attachment.type.startsWith('image/') ? 'image' : attachment.type.startsWith('video/') ? 'video' : undefined;
+    }
 
     // Handle file upload for human chat (not bot)
     if (attachment && selectedCase && activeChatTarget !== 'bot') {
@@ -397,21 +460,24 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
       if (!uploadErr) {
         const { data } = supabase.storage.from('chat-attachments').getPublicUrl(path);
         attachmentUrl = data?.publicUrl;
-        attachmentType = attachment.type.startsWith('image/') ? 'image' : attachment.type.startsWith('video/') ? 'video' : undefined;
       }
     }
 
-    setMsgs((p) => [...p, { id: 'u' + Date.now(), from: 'user', text: txt, time: userMsgTime, attachment_url: attachmentUrl, attachment_type: attachmentType }]);
-    setInput('');
+    const userMsg: ChatMsg = { id: 'u' + Date.now(), from: 'user', text: txt, time: userMsgTime, attachment_url: localPreviewUrl || attachmentUrl, attachment_type: attachmentType };
 
     /* LOCAL BOT MODE: Process entirely locally, no DB insert - TEXT ONLY */
     if (activeChatTarget === 'bot') {
+      setBotMsgs((p) => [...p, userMsg]);
+      setInput('');
       const reply = await botReply(txt);
-      setTimeout(() => setMsgs((p) => [...p, { id: 'b' + Date.now(), from: 'bot', text: reply, time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) }]), 420);
+      setTimeout(() => setBotMsgs((p) => [...p, { id: 'b' + Date.now(), from: 'bot', text: reply, time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) }]), 420);
       return;
     }
 
     /* REMOTE MODE: Insert to messages table for real-time chat with lawyer/staff */
+    setHumanMsgs((p) => [...p, { ...userMsg, attachment_url: attachmentUrl || localPreviewUrl }]);
+    setInput('');
+
     if (selectedCase) {
       await supabase.from('messages').insert([{
         case_id: selectedCase.id,
@@ -423,6 +489,9 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         room_type: 'client_chat',
       }]);
     }
+
+    // Revoke local preview URL after storage URL is set
+    if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
   };
 
   /* Generate Vodafone Cash USSD deep link */
@@ -479,7 +548,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
         }]);
 
         if (lawyerId) sendPushToClient(lawyerId, '🆘 طلب طوارئ عاجل!', emgText);
-        setMsgs((p) => [...p, {
+        setHumanMsgs((p) => [...p, {
           id: 'emg' + Date.now(),
           from: 'user',
           text: emergencyMessage,
@@ -626,7 +695,7 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
               </div>
             </div>
           )}
-          {msgs.map((msg) => {
+          {(activeChatTarget === 'bot' ? botMsgs : humanMsgs).map((msg) => {
             const isEmergency = msg.isEmergency || msg.text.startsWith('🆘') || msg.text.includes('【حالة طوارئ');
             const isSystem = msg.isSystem || msg.from === 'system' || msg.text.startsWith('【');
             const chatClass = msg.from === 'user' ? (isEmergency ? 'chat-emergency' : 'chat-me') : (isSystem ? 'chat-system' : (isEmergency ? 'chat-emergency' : 'chat-other'));
@@ -650,11 +719,10 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
                   background: isSystem && isEmergency ? 'linear-gradient(135deg, #C41E3A, #8B0000)' : undefined,
                 }}>
                   {msg.staffName && msg.from === 'staff' && <p style={{ fontSize: 10, fontWeight: 800, color: isEmergency || isSystem ? '#fff' : 'var(--gold)', marginBottom: 4 }}>{msg.staffName}</p>}
-                  {/* Render attachments for human chat only */}
-                  {msg.attachment_url && msg.attachment_type === 'image' && activeChatTarget !== 'bot' && (
+                  {msg.attachment_url && msg.attachment_type === 'image' && (
                     <img src={msg.attachment_url} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: msg.text ? 8 : 0 }} />
                   )}
-                  {msg.attachment_url && msg.attachment_type === 'video' && activeChatTarget !== 'bot' && (
+                  {msg.attachment_url && msg.attachment_type === 'video' && (
                     <video src={msg.attachment_url} controls style={{ maxWidth: '100%', borderRadius: 8, marginBottom: msg.text ? 8 : 0 }} />
                   )}
                   {msg.text}
@@ -671,11 +739,15 @@ export function ClientPortal({ user, profile, onLogout, urlLawyerId }: ClientPor
           {activeChatTarget !== 'bot' && (
             <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, background: '#F5F8FF', borderRadius: 12, cursor: 'pointer' }}>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept="image/*,video/*"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) send(file);
+                  if (file) {
+                    send(file);
+                    e.target.value = '';
+                  }
                 }}
                 style={{ display: 'none' }}
               />
